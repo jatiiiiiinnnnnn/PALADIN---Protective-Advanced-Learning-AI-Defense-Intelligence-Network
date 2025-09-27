@@ -1,0 +1,15 @@
+filebeat.inputs:
+- type: log
+  enabled: true
+  paths:
+    - /var/log/honeypots/*.json
+  scan_frequency: 10s
+  json:
+    keys_under_root: true
+    add_error_key: true
+    message_key: log
+
+output.redis:
+  hosts: ["redis:6379"]
+  key: "honeypot-logs"
+  data_type: "list"

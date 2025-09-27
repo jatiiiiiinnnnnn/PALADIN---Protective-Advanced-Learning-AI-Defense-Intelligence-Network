@@ -1,0 +1,36 @@
+# --- Python ---
+# Ignore the virtual environment folder
+*venv/
+env/
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+
+# Ignore environment variable files (NEVER commit secrets)
+.env
+.env.*
+
+# --- Logs ---
+# Ignore all log files and directories
+*.log
+logs/
+shared_logs/
+test_logs/
+
+# --- IDE / Editor ---
+# Ignore configuration files from popular editors
+.vscode/
+.idea/
+
+# --- Docker ---
+# Ignore local docker-compose override files
+docker-compose.override.yml
+docker-compose.override.yaml
+
+# --- OS Generated Files ---
+# Ignore macOS specific files
+.DS_Store
+
+# Ignore Windows specific files
+Thumbs.db
