@@ -5,7 +5,7 @@ from datetime import datetime
 # --- CONFIGURATION ---
 HOST = '0.0.0.0'
 PORT = 2525 
-LOG_FILE = '../shared_logs/smtp_honeypot.json'
+LOG_FILE = '/shared_logs/smtp_honeypot.json'
 
 # SMTP response codes
 RESP_WELCOME = b'220 mail.honeypot.net ESMTP Service ready\r\n'
@@ -37,58 +37,59 @@ def create_log_entry(addr, command, detail_data):
     return log_entry
 
 def handle_connection(conn, addr):
-    conn.sendall(RESP_WELCOME)
+    # Create a file-like object for easier line-by-line reading
+    makefile = conn.makefile('rw', encoding='utf-8', errors='ignore', newline='\r\n')
+
+    makefile.write('220 mail.honeypot.net ESMTP Service ready\r\n')
+    makefile.flush()
     mail_from = None
     mail_to = []
 
     while True:
         try:
-            data = conn.recv(1024).decode('utf-8', errors='ignore').strip()
-            if not data:
+            line = makefile.readline().strip()
+            if not line:
                 break
 
-            command_line = data.upper().split(':', 1)
-            command = command_line[0].split()[0] # Get the main command (e.g., HELO, MAIL, RCPT, DATA)
+            command_line = line.upper().split(':', 1)
+            command = command_line[0].split()[0]
 
             if command == 'QUIT':
-                conn.sendall(RESP_GOODBYE)
+                makefile.write('221 Bye\r\n')
                 break
-
             elif command == 'MAIL':
                 mail_from = command_line[1].strip() if len(command_line) > 1 else "UNKNOWN"
-                conn.sendall(RESP_OK)
-
+                makefile.write('250 OK\r\n')
             elif command == 'RCPT':
                 mail_to.append(command_line[1].strip() if len(command_line) > 1 else "UNKNOWN")
-                conn.sendall(RESP_OK)
-
+                makefile.write('250 OK\r\n')
             elif command == 'DATA':
-                conn.sendall(RESP_DATA_START)
-                # Simple state machine to read the email body until a single '.' is received
+                makefile.write('354 Start mail input; end with <CRLF>.<CRLF>\r\n')
+                makefile.flush()
+                
                 email_body = ""
                 while True:
-                    body_line = conn.recv(1024).decode('utf-8', errors='ignore')
+                    body_line = makefile.readline()
                     email_body += body_line
                     if body_line.strip() == '.':
                         break
-
-                # Log the entire email transaction
+                
                 log_entry = create_log_entry(addr, "EMAIL_RECEIVED", {
                     "from": mail_from, 
                     "to": mail_to,
-                    "body_snippet": email_body[:100].replace('\n', ' ') + "..." 
+                    "body_snippet": email_body[:100].replace('\n', ' ').strip() + "..."
                 })
                 log_event(log_entry)
-                conn.sendall(RESP_OK)
-
+                makefile.write('250 OK\r\n')
             elif command in ['HELO', 'EHLO', 'VRFY']:
-                conn.sendall(RESP_OK)
-
+                makefile.write('250 OK\r\n')
             else:
-                conn.sendall(RESP_SYNTAX_ERROR)
+                makefile.write('500 Syntax error, command unrecognised\r\n')
+            
+            makefile.flush()
 
         except Exception as e:
-            print(f"Error handling connection: {e}")
+            print(f"Error handling SMTP connection: {e}")
             break
 
 def start_server():

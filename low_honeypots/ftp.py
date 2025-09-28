@@ -5,7 +5,7 @@ from datetime import datetime
 # --- CONFIGURATION ---
 HOST = '0.0.0.0'
 PORT = 2121 
-LOG_FILE = '../shared_logs/ftp_honeypot.json'
+LOG_FILE = '/shared_logs/ftp_honeypot.json'
 
 # FTP response codes
 RESP_WELCOME = b'220 (ftpd-fake 1.0) Service ready.\r\n'
@@ -36,50 +36,52 @@ def create_log_entry(addr, command, detail_data):
     return log_entry
 
 def handle_connection(conn, addr):
-    conn.sendall(RESP_WELCOME)
+    # Create a file-like object for easier line-by-line reading
+    makefile = conn.makefile('rw', encoding='utf-8', errors='ignore', newline='\r\n')
+    
+    makefile.write('220 (ftpd-fake 1.0) Service ready.\r\n')
+    makefile.flush()
     username = None
 
     while True:
         try:
-            data = conn.recv(1024).decode('utf-8', errors='ignore').strip()
-            if not data:
+            line = makefile.readline().strip()
+            if not line:
                 break
 
-            command_line = data.upper().split()
+            command_line = line.upper().split()
             if not command_line:
                 continue
-
+            
             command = command_line[0]
             arg = " ".join(command_line[1:]) if len(command_line) > 1 else ""
 
             if command == 'USER':
                 username = arg
-                conn.sendall(b'331 User name okay, need password.\r\n')
+                makefile.write('331 User name okay, need password.\r\n')
             elif command == 'PASS':
                 password = arg
                 if username:
-                    # Log the login attempt
                     log_entry = create_log_entry(addr, "LOGIN_ATTEMPT", {"username": username, "password": password})
                     log_event(log_entry)
-
-                    # Fake a successful login for simple attacks
-                    conn.sendall(RESP_LOGIN_OK)
-                    username = f"{username}/{password}" # Mark as logged in
+                    makefile.write('230 User logged in, proceed.\r\n')
+                    username = f"{username}/{password}"
                 else:
-                    conn.sendall(RESP_LOGIN_FAIL)
+                    makefile.write('530 Not logged in.\r\n')
             elif command in ['STOR', 'RETR', 'GET', 'PUT']:
-                # Log file transfer commands
                 log_entry = create_log_entry(addr, "FILE_TRANSFER_ATTEMPT", {"command": command, "file": arg, "authenticated_as": username})
                 log_event(log_entry)
-                conn.sendall(RESP_CMD_OK)
+                makefile.write('200 Command okay.\r\n')
             elif command == 'QUIT':
-                conn.sendall(b'221 Goodbye.\r\n')
+                makefile.write('221 Goodbye.\r\n')
                 break
             else:
-                conn.sendall(RESP_CMD_OK)
+                makefile.write('200 Command okay.\r\n')
+            
+            makefile.flush()
 
         except Exception as e:
-            print(f"Error handling connection: {e}")
+            print(f"Error handling FTP connection: {e}")
             break
 
 def start_server():
