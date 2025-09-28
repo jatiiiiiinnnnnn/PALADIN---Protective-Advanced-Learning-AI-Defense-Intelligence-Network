@@ -1,0 +1,108 @@
+import socket
+import json
+from datetime import datetime
+
+# --- CONFIGURATION ---
+HOST = '0.0.0.0'
+PORT = 2525 
+LOG_FILE = '../shared_logs/smtp_honeypot.json'
+
+# SMTP response codes
+RESP_WELCOME = b'220 mail.honeypot.net ESMTP Service ready\r\n'
+RESP_OK = b'250 OK\r\n'
+RESP_DATA_START = b'354 Start mail input; end with <CRLF>.<CRLF>\r\n'
+RESP_GOODBYE = b'221 Bye\r\n'
+RESP_SYNTAX_ERROR = b'500 Syntax error, command unrecognised\r\n'
+
+def log_event(event_data):
+    """Writes a standardized JSON event to the shared log file."""
+    with open(LOG_FILE, 'a') as f:
+        json.dump(event_data, f)
+        f.write('\n')
+
+def create_log_entry(addr, command, detail_data):
+    """Constructs the log entry following the team's agreed-upon format."""
+    now_utc = datetime.utcnow().isoformat() + 'Z'
+
+    log_entry = {
+        "timestamp": now_utc,
+        "source_ip": addr[0],
+        "source_port": addr[1],
+        "destination_port": PORT,
+        "honeypot_name": "smtp-honeypot",
+        "service": "SMTP",
+        "event_type": command,
+        "details": detail_data
+    }
+    return log_entry
+
+def handle_connection(conn, addr):
+    conn.sendall(RESP_WELCOME)
+    mail_from = None
+    mail_to = []
+
+    while True:
+        try:
+            data = conn.recv(1024).decode('utf-8', errors='ignore').strip()
+            if not data:
+                break
+
+            command_line = data.upper().split(':', 1)
+            command = command_line[0].split()[0] # Get the main command (e.g., HELO, MAIL, RCPT, DATA)
+
+            if command == 'QUIT':
+                conn.sendall(RESP_GOODBYE)
+                break
+
+            elif command == 'MAIL':
+                mail_from = command_line[1].strip() if len(command_line) > 1 else "UNKNOWN"
+                conn.sendall(RESP_OK)
+
+            elif command == 'RCPT':
+                mail_to.append(command_line[1].strip() if len(command_line) > 1 else "UNKNOWN")
+                conn.sendall(RESP_OK)
+
+            elif command == 'DATA':
+                conn.sendall(RESP_DATA_START)
+                # Simple state machine to read the email body until a single '.' is received
+                email_body = ""
+                while True:
+                    body_line = conn.recv(1024).decode('utf-8', errors='ignore')
+                    email_body += body_line
+                    if body_line.strip() == '.':
+                        break
+
+                # Log the entire email transaction
+                log_entry = create_log_entry(addr, "EMAIL_RECEIVED", {
+                    "from": mail_from, 
+                    "to": mail_to,
+                    "body_snippet": email_body[:100].replace('\n', ' ') + "..." 
+                })
+                log_event(log_entry)
+                conn.sendall(RESP_OK)
+
+            elif command in ['HELO', 'EHLO', 'VRFY']:
+                conn.sendall(RESP_OK)
+
+            else:
+                conn.sendall(RESP_SYNTAX_ERROR)
+
+        except Exception as e:
+            print(f"Error handling connection: {e}")
+            break
+
+def start_server():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind((HOST, PORT))
+        s.listen(5)
+        print(f"[*] SMTP Honeypot listening on {HOST}:{PORT}. Logs to {LOG_FILE}")
+
+        while True:
+            conn, addr = s.accept()
+            with conn:
+                print(f"[*] Connection from {addr[0]} on SMTP")
+                handle_connection(conn, addr)
+
+if __name__ == '__main__':
+    start_server()
