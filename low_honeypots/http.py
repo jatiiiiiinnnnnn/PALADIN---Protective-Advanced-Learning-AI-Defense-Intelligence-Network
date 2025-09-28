@@ -5,7 +5,7 @@ from datetime import datetime
 # --- CONFIGURATION ---
 HOST = '0.0.0.0'
 PORT = 8080 
-LOG_FILE = '../shared_logs/http_honeypot.json'
+LOG_FILE = '/shared_logs/http_honeypot.json'
 
 # Standard response to appear as a regular web server
 STANDARD_RESPONSE = b'HTTP/1.1 200 OK\r\nServer: Apache/2.4.29\r\nContent-Type: text/html\r\n\r\n<h1>Welcome to the Honeypot!</h1>'

@@ -1,0 +1,63 @@
+# This is the master file to run the entire PALADIN project.
+
+# First, we declare the shared volume that all services will use.
+volumes:
+  shared-log-volume:
+
+services:
+  # --- Member 1's Low-Interaction Honeypots ---
+  http-honeypot:
+    build: ./low_honeypots
+    command: python http.py
+    ports:
+      - "8080:8080"
+    volumes:
+      # This service WRITES to the shared volume
+      - shared-log-volume:/shared_logs
+
+  ftp-honeypot:
+    build: ./low_honeypots
+    command: python ftp.py
+    ports:
+      - "2121:2121"
+    volumes:
+      # This service also WRITES to the shared volume
+      - shared-log-volume:/shared_logs
+
+  smtp-honeypot:
+    build: ./low_honeypots
+    command: python smtp.py
+    ports:
+      - "2525:2525"
+    volumes:
+      # This service also WRITES to the shared volume
+      - shared-log-volume:/shared_logs
+
+  # --- Member 2's Log Aggregation Pipeline ---
+  redis:
+    image: redis:7-alpine
+    container_name: "honeypot-redis"
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  filebeat:
+    build: ./log_pipeline/filebeat
+    container_name: "honeypot-filebeat"
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      # This service READS from the shared volume
+      - shared-log-volume:/var/log/honeypots:ro
+
+  consumer:
+    build: ./log_pipeline/consumer
+    container_name: "honeypot-consumer"
+    depends_on:
+      redis:
+        condition: service_healthy
