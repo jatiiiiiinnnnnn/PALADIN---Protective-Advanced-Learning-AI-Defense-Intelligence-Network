@@ -61,3 +61,22 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+
+
+  # --- Member 3's High-Interaction Honeypot ---
+  hi-backend:
+    build: ./high_cowrie/backend
+    ports:
+      - "127.0.0.1:2200:22"   # accessible from host only
+    restart: unless-stopped
+
+  cowrie:
+    build: ./high_cowrie/cowrie
+    depends_on:
+      - hi-backend
+    ports:
+      - "2222:2222"           # attackers connect here
+    volumes:
+      - ./shared_logs/cowrie:/cowrie/var/log/cowrie
+      - ./shared_logs/cowrie_lib:/cowrie/var/lib/cowrie
+    restart: unless-stopped
