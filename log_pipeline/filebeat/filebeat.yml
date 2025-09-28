@@ -2,7 +2,7 @@ filebeat.inputs:
 - type: log
   enabled: true
   paths:
-    - /var/log/honeypots/*.json
+  - /var/log/honeypots/**/*.json
   scan_frequency: 10s
   json:
     keys_under_root: true
