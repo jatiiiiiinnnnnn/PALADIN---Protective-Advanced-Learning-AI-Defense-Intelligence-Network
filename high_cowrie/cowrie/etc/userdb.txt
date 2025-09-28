@@ -1,0 +1,2 @@
+# userdb.txt
+pwnme:Password123!:proxy=yes
