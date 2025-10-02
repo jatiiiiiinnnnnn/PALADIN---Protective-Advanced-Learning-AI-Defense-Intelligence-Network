@@ -58,5 +58,14 @@ export PYTHONPATH=/home/cowrie/cowrie/src:$PYTHONPATH\n\
 exec /home/cowrie/cowrie/cowrie-env/bin/python -m twisted cowrie' > /home/cowrie/start.sh && \
     chmod +x /home/cowrie/start.sh
 
+
+# Create share directory and generate fs.pickle during build
+USER cowrie
+WORKDIR /home/cowrie/cowrie
+RUN mkdir -p share && \
+    chown cowrie:cowrie share && \
+    . cowrie-env/bin/activate && \
+    /home/cowrie/cowrie/cowrie-env/bin/createfs -l honeyfs -o share/fs.pickle
+
 # Set the default command - run our startup script
 CMD ["/bin/bash", "/home/cowrie/start.sh"]
