@@ -1,0 +1,66 @@
+# This is the final, working master file for the PALADIN project.
+
+volumes:
+  shared-log-volume:
+
+services:
+  # ... (http, ftp, smtp honeypots remain the same) ...
+  http-honeypot:
+    build: ./low_honeypots
+    command: python http.py
+    ports:
+      - "8080:8080"
+    volumes:
+      - shared-log-volume:/shared_logs
+  ftp-honeypot:
+    build: ./low_honeypots
+    command: python ftp.py
+    ports:
+      - "2121:2121"
+    volumes:
+      - shared-log-volume:/shared_logs
+  smtp-honeypot:
+    build: ./low_honeypots
+    command: python smtp.py
+    ports:
+      - "2525:2525"
+    volumes:
+      - shared-log-volume:/shared_logs
+
+  # --- Member 3's High-Interaction Honeypot (Final Version) ---
+  cowrie:
+    # Build our new, robust Dockerfile
+    build: ./high_cowrie
+    tty: true
+    ports:
+      - "2222:2222"
+    volumes:
+      # Mount the shared log volume to the directory we created and permissioned
+      - shared-log-volume:/shared_logs
+    restart: unless-stopped
+
+  # ... (redis, filebeat, consumer services remain the same) ...
+  redis:
+    image: redis:7-alpine
+    container_name: "honeypot-redis"
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  filebeat:
+    build: ./log_pipeline/filebeat
+    container_name: "honeypot-filebeat"
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - shared-log-volume:/var/log/honeypots:ro
+  consumer:
+    build: ./log_pipeline/consumer
+    container_name: "honeypot-consumer"
+    depends_on:
+      redis:
+        condition: service_healthy
