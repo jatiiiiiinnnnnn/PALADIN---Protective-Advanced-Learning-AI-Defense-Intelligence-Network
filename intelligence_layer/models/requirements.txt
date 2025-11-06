@@ -1,0 +1,7 @@
+pandas
+numpy
+scikit-learn
+kagglehub
+xgboost
+tensorflow==2.14.0
+

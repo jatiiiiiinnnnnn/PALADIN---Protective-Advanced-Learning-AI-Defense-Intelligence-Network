@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  models:
+    build:
+      context: ./models
+      dockerfile: Dockerfile
+    container_name: intel_models
+    command: ["python", "models/test_models.py"]
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+    platform: linux/amd64
