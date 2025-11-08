@@ -15,7 +15,7 @@ RESP_LOGIN_FAIL = b'530 Not logged in.\r\n'
 
 def log_event(event_data):
     """Writes a standardized JSON event to the shared log file."""
-    with open(LOG_FILE, 'a') as f:
+    with open(LOG_FILE, 'a+') as f:
         json.dump(event_data, f)
         f.write('\n')
 

@@ -1,13 +1,20 @@
 # This is the final, working master file for the PALADIN project.
 
 volumes:
+  esdata:
+    driver: local
   shared-log-volume:
+
+networks:
+  paladin-net:
+    driver: bridge
 
 services:
   # ... (http, ftp, smtp honeypots remain the same) ...
   http-honeypot:
     build: ./low_honeypots
     command: python http.py
+    user: root
     ports:
       - "8080:8080"
     volumes:
@@ -15,6 +22,7 @@ services:
   ftp-honeypot:
     build: ./low_honeypots
     command: python ftp.py
+    user: root
     ports:
       - "2121:2121"
     volumes:
@@ -22,6 +30,7 @@ services:
   smtp-honeypot:
     build: ./low_honeypots
     command: python smtp.py
+    user: root
     ports:
       - "2525:2525"
     volumes:
@@ -50,6 +59,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - paladin-net
   filebeat:
     build: ./log_pipeline/filebeat
     container_name: "honeypot-filebeat"
@@ -64,3 +75,42 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    networks: 
+      - paladin-net
+
+  #Services for Persistence Layer
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.6
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - paladin-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.17.6
+    container_name: kibana
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_HOST=0.0.0.0
+    networks:
+      - paladin-net
+    depends_on:
+      - elasticsearch
+

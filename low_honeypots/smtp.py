@@ -16,7 +16,7 @@ RESP_SYNTAX_ERROR = b'500 Syntax error, command unrecognised\r\n'
 
 def log_event(event_data):
     """Writes a standardized JSON event to the shared log file."""
-    with open(LOG_FILE, 'a') as f:
+    with open(LOG_FILE, 'a+') as f:
         json.dump(event_data, f)
         f.write('\n')
 
