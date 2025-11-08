@@ -12,9 +12,19 @@ STANDARD_RESPONSE = b'HTTP/1.1 200 OK\r\nServer: Apache/2.4.29\r\nContent-Type: 
 
 def log_event(event_data):
     """Writes a standardized JSON event to the shared log file."""
-    with open(LOG_FILE, 'a') as f:
-        json.dump(event_data, f)
-        f.write('\n')
+    print(f"[DEBUG] Attempting to log event to {LOG_FILE}")
+    try:
+        with open(LOG_FILE, 'a+') as f:
+            json.dump(event_data, f)
+            f.write('\n')
+            f.flush()
+        print(f"[DEBUG] Log successful.")
+
+    except Exception as log_e:
+        # If the file write fails, this prints the error directly to the Docker logs.
+        import traceback
+        print(f"[!!] FAILED TO WRITE LOG: {log_e}")
+        traceback.print_exc()
 
 def create_log_entry(addr, request):
     """Constructs the log entry following the team's agreed-upon format."""
