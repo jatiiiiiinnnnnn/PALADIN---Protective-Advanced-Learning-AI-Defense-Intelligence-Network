@@ -1,84 +1,60 @@
-# This is the final, working master file for the PALADIN project.
+# Master docker-compose.yml for Project PALADIN
+# FINAL VERSION: Simplified networking for maximum stability.
 
 volumes:
-  esdata:
-    driver: local
   shared-log-volume:
-
-networks:
-  paladin-net:
-    driver: bridge
+  esdata:
 
 services:
-  # ... (http, ftp, smtp honeypots remain the same) ...
+  # --- Deception Layer ---
   http-honeypot:
     build: ./low_honeypots
     command: python http.py
-    user: root
-    ports:
-      - "8080:8080"
-    volumes:
-      - shared-log-volume:/shared_logs
+    ports: ["8080:8080"]
+    volumes: [shared-log-volume:/shared_logs]
   ftp-honeypot:
     build: ./low_honeypots
     command: python ftp.py
-    user: root
-    ports:
-      - "2121:2121"
-    volumes:
-      - shared-log-volume:/shared_logs
+    ports: ["2121:2121"]
+    volumes: [shared-log-volume:/shared_logs]
   smtp-honeypot:
     build: ./low_honeypots
     command: python smtp.py
-    user: root
-    ports:
-      - "2525:2525"
-    volumes:
-      - shared-log-volume:/shared_logs
-
-  # --- Member 3's High-Interaction Honeypot (Final Version) ---
+    ports: ["2525:2525"]
+    volumes: [shared-log-volume:/shared_logs]
   cowrie:
-    # Build our new, robust Dockerfile
-    build: ./high_cowrie
-    tty: true
-    ports:
-      - "2222:2222"
-    volumes:
-      # Mount the shared log volume to the directory we created and permissioned
-      - shared-log-volume:/shared_logs
+    image: cowrie/cowrie:latest
+    ports: ["2222:2222"]
     restart: unless-stopped
 
-  # ... (redis, filebeat, consumer services remain the same) ...
+  # --- Aggregation Layer ---
   redis:
     image: redis:7-alpine
     container_name: "honeypot-redis"
-    ports:
-      - "6379:6379"
+    ports: ["6379:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - paladin-net
+
   filebeat:
     build: ./log_pipeline/filebeat
     container_name: "honeypot-filebeat"
     depends_on:
-      redis:
-        condition: service_healthy
+      redis: { condition: service_healthy }
     volumes:
       - shared-log-volume:/var/log/honeypots:ro
+
   consumer:
     build: ./log_pipeline/consumer
     container_name: "honeypot-consumer"
+    ports: ["5001:5001"]
     depends_on:
-      redis:
-        condition: service_healthy
-    networks: 
-      - paladin-net
+      redis: { condition: service_healthy }
+      elasticsearch: { condition: service_healthy }
 
-  #Services for Persistence Layer
+  # --- Persistence Layer ---
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:7.17.6
     container_name: elasticsearch
@@ -86,31 +62,22 @@ services:
       - discovery.type=single-node
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
     ulimits:
-      memlock:
-        soft: -1
-        hard: -1
+      memlock: { soft: -1, hard: -1 }
     volumes:
       - esdata:/usr/share/elasticsearch/data
-    ports:
-      - "9200:9200"
-    networks:
-      - paladin-net
+    ports: ["9200:9200"]
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:9200 || exit 1"]
-      interval: 10s
-      timeout: 10s
-      retries: 5
+      interval: 30s    # Check every 30 seconds instead of 10
+      timeout: 30s     # Allow 30 seconds for a response
+      retries: 10      # Try 10 times before giving up (total ~5 minutes)
+      start_period: 60s # Give it a minute of grace period before starting checks
 
   kibana:
     image: docker.elastic.co/kibana/kibana:7.17.6
     container_name: kibana
-    ports:
-      - "5601:5601"
+    ports: ["5601:5601"]
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-      - SERVER_HOST=0.0.0.0
-    networks:
-      - paladin-net
     depends_on:
       - elasticsearch
-
