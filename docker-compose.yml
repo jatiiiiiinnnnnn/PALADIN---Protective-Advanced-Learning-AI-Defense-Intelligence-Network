@@ -53,6 +53,8 @@ services:
     depends_on:
       redis: { condition: service_healthy }
       elasticsearch: { condition: service_healthy }
+    volumes:
+      - ./log_pipeline/consumer:/app:rw
 
   # --- Persistence Layer ---
   elasticsearch:

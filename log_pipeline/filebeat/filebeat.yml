@@ -7,7 +7,7 @@ filebeat.inputs:
   json:
     keys_under_root: true
     add_error_key: true
-    message_key: log
+    
 
 output.redis:
   hosts: ["redis:6379"]
