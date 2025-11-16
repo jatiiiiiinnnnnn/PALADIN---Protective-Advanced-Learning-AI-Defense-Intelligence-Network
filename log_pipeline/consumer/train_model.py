@@ -1,94 +1,112 @@
 import joblib
 import numpy as np
-from sklearn.ensemble import IsolationForest
+from sklearn.svm import OneClassSVM
+from sklearn.preprocessing import StandardScaler
 import os
 
-print("🤖 Training improved PALADIN anomaly detection model...")
+print("🤖 Training PALADIN anomaly detection model (One-Class SVM)...")
 
-# Define features: [port, hour_of_day, is_ssh, failed_login, num_attempts]
-# Train ONLY on legitimate traffic patterns - NO attacks in training data!
+# Define features: [port, is_ssh, failed_login, num_attempts]
+# Train ONLY on legitimate traffic - OneClassSVM learns what's "normal"
 
 X_train = np.array([
-    # HTTP traffic (normal web browsing during business hours)
-    [8080, 9, 0, 0, 1],
-    [8080, 10, 0, 0, 1],
-    [8080, 11, 0, 0, 1],
-    [8080, 13, 0, 0, 1],
-    [8080, 14, 0, 0, 1],
-    [8080, 15, 0, 0, 1],
-    [8080, 16, 0, 0, 1],
-    [8080, 17, 0, 0, 1],
+    # HTTP traffic (normal) - [port, is_ssh, failed_login, attempts]
+    [8080, 0, 0, 1],
+    [8080, 0, 0, 1],
+    [8080, 0, 0, 1],
+    [8080, 0, 0, 1],
+    [8080, 0, 0, 1],
+    [8080, 0, 0, 1],
+    [8080, 0, 0, 1],
+    [8080, 0, 0, 1],
     
-    # FTP traffic (normal file transfers during work hours)
-    [2121, 10, 0, 0, 1],
-    [2121, 11, 0, 0, 1],
-    [2121, 14, 0, 0, 1],
-    [2121, 15, 0, 0, 1],
-    [2121, 16, 0, 0, 1],
+    # FTP traffic (normal)
+    [2121, 0, 0, 1],
+    [2121, 0, 0, 1],
+    [2121, 0, 0, 1],
+    [2121, 0, 0, 1],
+    [2121, 0, 0, 1],
     
-    # SMTP traffic (normal email sending)
-    [2525, 8, 0, 0, 1],
-    [2525, 9, 0, 0, 1],
-    [2525, 12, 0, 0, 1],
-    [2525, 14, 0, 0, 1],
-    [2525, 17, 0, 0, 1],
+    # SMTP traffic (normal)
+    [2525, 0, 0, 1],
+    [2525, 0, 0, 1],
+    [2525, 0, 0, 1],
+    [2525, 0, 0, 1],
 ])
 
-# Train the model - key: contamination must be very low since training data is all normal
-model = IsolationForest(
-    n_estimators=200,      # More trees for better detection
-    contamination=0.001,   # Expect almost no anomalies in training (0.1%)
-    random_state=42,
-    max_samples='auto',
-    bootstrap=False        # Don't bootstrap for small datasets
-)
-model.fit(X_train)
+# Scale features
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
 
-# Save it
+# Train One-Class SVM (better for anomaly detection with small datasets)
+model = OneClassSVM(
+    kernel='rbf',       # Radial basis function for non-linear patterns
+    gamma='auto',       # Auto-calculate gamma
+    nu=0.05            # Expected proportion of outliers (5%)
+)
+model.fit(X_train_scaled)
+
+# Save both model and scaler
 model_filename = '/app/anomaly_detector.pkl'
+scaler_filename = '/app/scaler.pkl'
+
 joblib.dump(model, model_filename)
+joblib.dump(scaler, scaler_filename)
+
 print(f"✅ Model saved to: {model_filename}")
+print(f"✅ Scaler saved to: {scaler_filename}")
 
 print("\n" + "="*70)
 print("MODEL VALIDATION TESTS")
 print("="*70)
 
 # Test normal traffic
-print("\n✅ NORMAL TRAFFIC (Should have POSITIVE scores):")
+print("\n✅ NORMAL TRAFFIC (Prediction = 1 is normal):")
 normal_tests = [
-    ([8080, 10, 0, 0, 1], "HTTP at 10 AM, no failed login"),
-    ([2121, 14, 0, 0, 1], "FTP at 2 PM, no failed login"),
-    ([2525, 9, 0, 0, 1], "SMTP at 9 AM, no failed login"),
-    ([8080, 15, 0, 0, 1], "HTTP at 3 PM, normal pattern"),
+    ([8080, 0, 0, 1], "HTTP normal request"),
+    ([2121, 0, 0, 1], "FTP normal transfer"),
+    ([2525, 0, 0, 1], "SMTP normal email"),
+    ([8080, 0, 0, 1], "HTTP another request"),
 ]
 
 for features, description in normal_tests:
-    score = model.decision_function([features])[0]
-    prediction = model.predict([features])[0]
+    features_scaled = scaler.transform([features])
+    prediction = model.predict(features_scaled)[0]
+    score = model.decision_function(features_scaled)[0]
     status = "✅ NORMAL" if prediction == 1 else "🚨 ANOMALY"
-    print(f"  {description:35s} Score: {score:+.4f} → {status}")
+    print(f"  {description:30s} Pred: {prediction:+2d} | Score: {score:+.4f} → {status}")
 
 # Test anomalous patterns
-print("\n🚨 ATTACK PATTERNS (Should have NEGATIVE scores):")
+print("\n🚨 ATTACK PATTERNS (Prediction = -1 is anomaly):")
 attack_tests = [
-    ([2222, 10, 1, 1, 3], "SSH with failed login (port 2222)"),
-    ([2222, 3, 1, 1, 3], "SSH at 3 AM (suspicious time)"),
-    ([2222, 2, 1, 1, 10], "SSH brute force (10 attempts at 2 AM)"),
-    ([8080, 2, 0, 1, 1], "HTTP with failed login at 2 AM"),
-    ([2121, 23, 0, 1, 5], "FTP failed login late night"),
-    ([2222, 15, 1, 1, 1], "Any SSH failed login (Cowrie trap)"),
-    ([2222, 12, 1, 0, 1], "SSH connection (even no failed login)"),
+    ([2222, 1, 0, 1], "SSH connection (honeypot port)"),
+    ([2222, 1, 1, 1], "SSH with failed login"),
+    ([2222, 1, 1, 3], "SSH brute force (3 attempts)"),
+    ([2222, 1, 1, 10], "SSH scanning (10 attempts)"),
+    ([8080, 0, 1, 1], "HTTP with failed login"),
+    ([2121, 0, 1, 5], "FTP brute force"),
+    ([9999, 0, 0, 1], "Unknown port scan"),
+    ([2222, 1, 0, 3], "SSH port scan"),
 ]
 
 for features, description in attack_tests:
-    score = model.decision_function([features])[0]
-    prediction = model.predict([features])[0]
-    status = "🚨 ANOMALY" if prediction == -1 else "❌ MISSED (should be anomaly!)"
-    print(f"  {description:35s} Score: {score:+.4f} → {status}")
+    features_scaled = scaler.transform([features])
+    prediction = model.predict(features_scaled)[0]
+    score = model.decision_function(features_scaled)[0]
+    status = "🚨 ANOMALY" if prediction == -1 else "❌ MISSED"
+    print(f"  {description:30s} Pred: {prediction:+2d} | Score: {score:+.4f} → {status}")
 
 print("\n" + "="*70)
-print("KEY INSIGHT:")
-print("  - Normal traffic: ports 8080, 2121, 2525 during business hours")
-print("  - Attacks: port 2222 (SSH honeypot), failed logins, odd hours")
-print("  - SSH (port 2222) should ALWAYS be anomalous - it's a honeypot!")
+print("MODEL DETAILS:")
+print(f"  Algorithm: One-Class SVM (better for anomaly detection)")
+print(f"  Features: [port, is_ssh, failed_login, num_attempts]")
+print(f"  Training samples: {len(X_train)} normal patterns")
+print(f"  Expected outlier rate: 5%")
+print("="*70)
+print("\nKEY BEHAVIORS:")
+print("  ✅ Ports 8080, 2121, 2525 with no failures = NORMAL")
+print("  🚨 Port 2222 (SSH honeypot) = ANOMALY")
+print("  🚨 Any failed login = ANOMALY")
+print("  🚨 Unknown ports = ANOMALY")
+print("  🚨 Multiple attempts = ANOMALY")
 print("="*70)

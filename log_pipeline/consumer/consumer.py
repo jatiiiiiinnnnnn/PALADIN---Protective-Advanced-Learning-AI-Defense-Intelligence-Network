@@ -14,14 +14,14 @@ QUEUE_NAME = 'honeypot-logs'
 ES_HOST = 'elasticsearch'
 ES_PORT = 9200
 
-# --- 1. LOAD ML MODEL ---
-print("[AI] Initializing Intelligence Layer...")
 try:
-    ml_model = joblib.load('anomaly_detector.pkl')
-    print("✅ [AI] Anomaly Detection Model loaded successfully!")
+    ml_model = joblib.load('/app/anomaly_detector.pkl')
+    scaler = joblib.load('/app/scaler.pkl')
+    print("✅ [AI] Anomaly Detection Model and Scaler loaded successfully!")
 except Exception as e:
-    print(f"⚠️ [AI] Warning: Could not load model. Running in data-only mode. Error: {e}")
     ml_model = None
+    scaler = None
+    print(f"❌ [AI] Failed to load model: {e}")
 
 def connect_redis():
     r = None
@@ -52,31 +52,20 @@ def connect_es():
             time.sleep(5)
 
 def process_log(log_data):
-    """Runs the AI model on the log data with multi-feature detection."""
-    if ml_model:
+    """Runs the AI model on the log data with improved feature detection."""
+    if ml_model and scaler:
         try:
-            # 1. Extract Features
+            # 1. Extract Features (4 features total, NO hour_of_day)
             
             # Feature 1: Port
             port_val = log_data.get('destination_port', 0)
             port = int(port_val) if str(port_val).isdigit() else 0
             
-            # Feature 2: Hour of day (0-23)
-            timestamp_str = log_data.get('timestamp', '')
-            hour = 12  # Default to noon if parsing fails
-            try:
-                # Try parsing ISO format: "2025-11-16T06:24:02.866991Z"
-                if timestamp_str:
-                    dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                    hour = dt.hour
-            except:
-                pass
-            
-            # Feature 3: Is SSH? (1 = yes, 0 = no)
+            # Feature 2: Is SSH? (1 = yes, 0 = no)
             service = log_data.get('service', '').upper()
             is_ssh = 1 if service == 'SSH' else 0
             
-            # Feature 4: Failed login attempt? (1 = yes, 0 = no)
+            # Feature 3: Failed login attempt? (1 = yes, 0 = no)
             message = str(log_data.get('message', '')).lower()
             eventid = str(log_data.get('eventid', '')).lower()
             failed_login = 1 if (
@@ -84,32 +73,24 @@ def process_log(log_data):
                 'login.failed' in eventid
             ) else 0
             
-            # Feature 5: Number of attempts (approximate from event type)
-            # For now, we'll use 1 for normal, but detect multiple events
+            # Feature 4: Number of attempts
             num_attempts = 1
             if failed_login:
-                # If it's a failed login, it might be part of brute force
-                num_attempts = 3  # Assume multiple attempts for failed logins
+                num_attempts = 3  # Assume brute force for failed logins
             
-            # 2. Create feature vector
-            features = np.array([[port, hour, is_ssh, failed_login, num_attempts]])
+            # 2. Create feature vector [port, is_ssh, failed_login, num_attempts]
+            features = np.array([[port, is_ssh, failed_login, num_attempts]])
             
-            # 3. Predict
-            score = ml_model.decision_function(features)[0]
-            prediction = ml_model.predict(features)[0]
+            # 3. Scale features (CRITICAL for consistency!)
+            features_scaled = scaler.transform(features)
             
-            # 4. Enrich the log
+            # 4. Predict
+            score = ml_model.decision_function(features_scaled)[0]
+            prediction = ml_model.predict(features_scaled)[0]
+            
+            # 5. Enrich the log
             log_data['ai_anomaly_score'] = round(float(score), 4)
-            log_data['ai_is_anomaly'] = bool(prediction == -1)  # -1 means anomaly
-            
-            # Add debug info (optional - remove in production)
-            log_data['ai_features'] = {
-                'port': port,
-                'hour': hour,
-                'is_ssh': is_ssh,
-                'failed_login': failed_login,
-                'num_attempts': num_attempts
-            }
+            log_data['ai_is_anomaly'] = bool(prediction == -1)  # -1 = anomaly
             
         except Exception as e:
             log_data['ai_error'] = str(e)
