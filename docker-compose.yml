@@ -1,33 +1,57 @@
-# Master docker-compose.yml for Project PALADIN
-# FINAL VERSION: Simplified networking for maximum stability.
+# Final integrated PALADIN Honeypot System
 
 volumes:
   shared-log-volume:
   esdata:
 
 services:
-  # --- Deception Layer ---
+  # --- Low-Interaction Honeypots ---
   http-honeypot:
     build: ./low_honeypots
     command: python http.py
     ports: ["8080:8080"]
-    volumes: [shared-log-volume:/shared_logs]
+    volumes: 
+      - shared-log-volume:/shared_logs
+    
   ftp-honeypot:
     build: ./low_honeypots
     command: python ftp.py
     ports: ["2121:2121"]
-    volumes: [shared-log-volume:/shared_logs]
+    volumes: 
+      - shared-log-volume:/shared_logs
+    
   smtp-honeypot:
     build: ./low_honeypots
     command: python smtp.py
     ports: ["2525:2525"]
-    volumes: [shared-log-volume:/shared_logs]
+    volumes: 
+      - shared-log-volume:/shared_logs
+
+  log-permissions-fixer:
+    image: busybox
+    user: root
+    volumes:
+      - shared-log-volume:/data
+    command: sh -c "
+      mkdir -p /data/log/cowrie &&
+      mkdir -p /data/lib/cowrie/tty &&
+      chmod -R 777 /data
+      "
+
+  # --- High-Interaction SSH Honeypot (Cowrie) ---
   cowrie:
     image: cowrie/cowrie:latest
-    ports: ["2222:2222"]
+    depends_on:
+      log-permissions-fixer:
+        condition: service_completed_successfully
+    ports:
+      - "2222:2222"
+    volumes:
+      - ./high_cowrie/etc/cowrie.cfg:/cowrie/cowrie-git/etc/cowrie.cfg:ro  # Changed path!
+      - shared-log-volume:/cowrie/var
     restart: unless-stopped
 
-  # --- Aggregation Layer ---
+  # --- Log Aggregation ---
   redis:
     image: redis:7-alpine
     container_name: "honeypot-redis"
@@ -44,19 +68,20 @@ services:
     depends_on:
       redis: { condition: service_healthy }
     volumes:
-      - shared-log-volume:/var/log/honeypots:ro
+      - shared-log-volume:/shared_logs:ro
+      - shared-log-volume:/cowrie_logs:ro  # Mount the same volume at a different path
 
+  # --- AI Consumer ---
   consumer:
     build: ./log_pipeline/consumer
     container_name: "honeypot-consumer"
-    ports: ["5001:5001"]
     depends_on:
       redis: { condition: service_healthy }
       elasticsearch: { condition: service_healthy }
     volumes:
       - ./log_pipeline/consumer:/app:rw
 
-  # --- Persistence Layer ---
+  # --- Data Persistence ---
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:7.17.6
     container_name: elasticsearch
@@ -70,11 +95,11 @@ services:
     ports: ["9200:9200"]
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:9200 || exit 1"]
-      interval: 30s    # Check every 30 seconds instead of 10
-      timeout: 30s     # Allow 30 seconds for a response
-      retries: 10      # Try 10 times before giving up (total ~5 minutes)
-      start_period: 60s # Give it a minute of grace period before starting checks
-
+      interval: 30s
+      timeout: 30s
+      retries: 10
+      start_period: 60s
+      
   kibana:
     image: docker.elastic.co/kibana/kibana:7.17.6
     container_name: kibana

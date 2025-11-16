@@ -3,6 +3,7 @@ import json
 import sys
 import time
 import joblib
+from datetime import datetime
 import numpy as np
 from elasticsearch import Elasticsearch
 
@@ -23,7 +24,6 @@ except Exception as e:
     ml_model = None
 
 def connect_redis():
-    # ... (same as before)
     r = None
     while not r:
         try:
@@ -37,7 +37,6 @@ def connect_redis():
             time.sleep(5)
 
 def connect_es():
-    # ... (same as before)
     es = None
     while not es:
         try:
@@ -53,19 +52,69 @@ def connect_es():
             time.sleep(5)
 
 def process_log(log_data):
-    # ... (same as before)
+    """Runs the AI model on the log data with multi-feature detection."""
     if ml_model:
         try:
-            # Use 0 if port is missing or N/A
+            # 1. Extract Features
+            
+            # Feature 1: Port
             port_val = log_data.get('destination_port', 0)
-            # Handle cases where it might be a string "2222" or int 2222
             port = int(port_val) if str(port_val).isdigit() else 0
             
-            score = ml_model.decision_function([[port]])[0]
+            # Feature 2: Hour of day (0-23)
+            timestamp_str = log_data.get('timestamp', '')
+            hour = 12  # Default to noon if parsing fails
+            try:
+                # Try parsing ISO format: "2025-11-16T06:24:02.866991Z"
+                if timestamp_str:
+                    dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                    hour = dt.hour
+            except:
+                pass
+            
+            # Feature 3: Is SSH? (1 = yes, 0 = no)
+            service = log_data.get('service', '').upper()
+            is_ssh = 1 if service == 'SSH' else 0
+            
+            # Feature 4: Failed login attempt? (1 = yes, 0 = no)
+            message = str(log_data.get('message', '')).lower()
+            eventid = str(log_data.get('eventid', '')).lower()
+            failed_login = 1 if (
+                ('login' in message and 'failed' in message) or
+                'login.failed' in eventid
+            ) else 0
+            
+            # Feature 5: Number of attempts (approximate from event type)
+            # For now, we'll use 1 for normal, but detect multiple events
+            num_attempts = 1
+            if failed_login:
+                # If it's a failed login, it might be part of brute force
+                num_attempts = 3  # Assume multiple attempts for failed logins
+            
+            # 2. Create feature vector
+            features = np.array([[port, hour, is_ssh, failed_login, num_attempts]])
+            
+            # 3. Predict
+            score = ml_model.decision_function(features)[0]
+            prediction = ml_model.predict(features)[0]
+            
+            # 4. Enrich the log
             log_data['ai_anomaly_score'] = round(float(score), 4)
-            log_data['ai_is_anomaly'] = bool(score < 0)
+            log_data['ai_is_anomaly'] = bool(prediction == -1)  # -1 means anomaly
+            
+            # Add debug info (optional - remove in production)
+            log_data['ai_features'] = {
+                'port': port,
+                'hour': hour,
+                'is_ssh': is_ssh,
+                'failed_login': failed_login,
+                'num_attempts': num_attempts
+            }
+            
         except Exception as e:
             log_data['ai_error'] = str(e)
+            print(f"[AI ERROR] {e}")
+    
     return log_data
 
 def main():
@@ -74,48 +123,65 @@ def main():
 
     print("-" * 50)
     print(f"🚀 PALADIN Intelligence Consumer ONLINE.")
+    print(f"[*] Waiting for logs in queue: '{QUEUE_NAME}'...")
     print("-" * 50)
 
+    # Main event loop
     while True:
         try:
+            # Blocking pop: waits for log to arrive
             message = r.blpop(QUEUE_NAME, timeout=1)
-            if not message: continue
+            if not message:
+                continue
 
-            # 1. First Parse: Decode the entry from Redis (Filebeat's wrapper)
+            # message[1] is the data from Redis
             raw_data = message[1]
+            
+            # Parse the JSON
             log_data = json.loads(raw_data)
-
-            # --- CRITICAL FIX: UNWRAP THE INNER MESSAGE ---
-            # If Filebeat wrapped our JSON in a 'message' string, parse it again.
-            if 'message' in log_data and isinstance(log_data['message'], str):
-                try:
-                    # This extracts destination_port, service, etc. to the top level
-                    inner_data = json.loads(log_data['message'])
-                    if isinstance(inner_data, dict):
-                        log_data.update(inner_data)
-                except json.JSONDecodeError:
-                    # It wasn't JSON, just a normal text log. Ignore.
-                    pass
-            # ---------------------------------------------
-
-            # 2. Intelligence Step
+            
+            # The codec.json in filebeat already sent clean JSON
+            # No need to unwrap a "message" field anymore!
+            
+            # Normalize Cowrie fields to match our standard format
+            if 'protocol' in log_data and 'service' not in log_data:
+                log_data['service'] = log_data['protocol'].upper()
+            
+            if 'dst_port' in log_data and 'destination_port' not in log_data:
+                log_data['destination_port'] = log_data['dst_port']
+            
+            # If it's SSH and no port specified, default to 2222
+            if log_data.get('service') == 'SSH' and 'destination_port' not in log_data:
+                log_data['destination_port'] = 2222
+            
+            # Process with AI
             enriched_log = process_log(log_data)
 
-            # 3. Output
+            # Display results
             score = enriched_log.get('ai_anomaly_score', 'N/A')
             status = "🚨 ANOMALY" if enriched_log.get('ai_is_anomaly') else "✅ Normal"
             
-            print(f"\n[Received] {log_data.get('@timestamp', 'No timestamp')}")
-            print(f"   Service: {log_data.get('service', 'Unknown')} | Port: {log_data.get('destination_port', 'Unknown')}")
+            print(f"\n[Received] {enriched_log.get('timestamp', 'No timestamp')}")
+            print(f"   Service: {enriched_log.get('service', 'Unknown')} | Port: {enriched_log.get('destination_port', 'Unknown')}")
             print(f"   AI Analysis: {status} (Score: {score})")
 
+            # Save to Elasticsearch
             if es:
                 try:
-                    es.index(index='honeypot-logs', document=enriched_log)
-                except Exception: pass
+                    resp = es.index(index='honeypot-logs', document=enriched_log)
+                except Exception as es_e:
+                    print(f"   [!] Database Write Failed: {es_e}")
 
+        except json.JSONDecodeError as jde:
+            print(f"[!] JSON Decode Error: {jde}")
+            print(f"[!] Problematic data: {message[1][:500]}")
+        except KeyboardInterrupt:
+            print("\n[!] Shutting down consumer.")
+            sys.exit(0)
         except Exception as e:
-            print(f"[!] Error: {e}")
+            print(f"[!] Unexpected error in main loop: {e}")
+            import traceback
+            traceback.print_exc()
             time.sleep(1)
 
 if __name__ == '__main__':

@@ -1,13 +1,12 @@
 filebeat.inputs:
-- type: filestream
+- type: log
   enabled: true
   paths:
-  - /var/log/honeypots/*.json
+    - /shared_logs/*.json
+    - /shared_logs/var/log/cowrie/*.json
   scan_frequency: 10s
-  json:
-    keys_under_root: true
-    add_error_key: true
-    
+  json.keys_under_root: true
+  json.add_error_key: false
 
 output.redis:
   hosts: ["redis:6379"]
@@ -15,3 +14,5 @@ output.redis:
   data_type: "list"
   db: 0
   timeout: 5s
+  codec.json:
+    pretty: false
