@@ -17,11 +17,21 @@ __pycache__/
 logs/
 shared_logs/
 test_logs/
+lstm_state.pkl
 
 # --- IDE / Editor ---
 # Ignore configuration files from popular editors
 .vscode/
 .idea/
+log_pipeline/consumer/data/raw
+log_pipeline/consumer/data/processed
+
+# Ignore Datasets
+*.csv
+
+/data/cic_ids_2017/
+MachineLearningCSV/
+GeneratedLabelledFlows/
 
 # --- Docker ---
 # Ignore local docker-compose override files

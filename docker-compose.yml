@@ -15,14 +15,14 @@ services:
     
   ftp-honeypot:
     build: ./low_honeypots
-    command: python ftp.py
+    command: sh -c "python -u ftp.py >> /shared_logs/ftp.log 2>&1"
     ports: ["2121:2121"]
     volumes: 
       - shared-log-volume:/shared_logs
     
   smtp-honeypot:
     build: ./low_honeypots
-    command: python smtp.py
+    command: sh -c "python -u smtp.py >> /shared_logs/smtp.log 2>&1"
     ports: ["2525:2525"]
     volumes: 
       - shared-log-volume:/shared_logs
@@ -75,6 +75,7 @@ services:
   consumer:
     build: ./log_pipeline/consumer
     container_name: "honeypot-consumer"
+    command: python -u consumer.py
     depends_on:
       redis: { condition: service_healthy }
       elasticsearch: { condition: service_healthy }
@@ -83,7 +84,7 @@ services:
 
   # --- Data Persistence ---
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.6
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.9
     container_name: elasticsearch
     environment:
       - discovery.type=single-node

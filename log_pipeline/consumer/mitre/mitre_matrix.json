@@ -1,0 +1,476 @@
+{
+  "attack_mappings": {
+    "NORMAL": {
+      "tactics": [],
+      "techniques": [],
+      "severity": "INFO",
+      "description": "Legitimate network traffic",
+      "detection": "Baseline behavior analysis",
+      "mitigation": "None required - normal traffic"
+    },
+    "BRUTE_FORCE": {
+      "tactics": ["Credential Access", "Initial Access"],
+      "techniques": [
+        {
+          "id": "T1110",
+          "name": "Brute Force",
+          "sub_techniques": [
+            {
+              "id": "T1110.001",
+              "name": "Password Guessing"
+            },
+            {
+              "id": "T1110.003",
+              "name": "Password Spraying"
+            }
+          ]
+        }
+      ],
+      "severity": "HIGH",
+      "description": "Adversary attempting to gain access through password guessing",
+      "detection": "Monitor for multiple failed authentication attempts from single source",
+      "mitigation": "Implement account lockout policies, MFA, rate limiting, strong password policies"
+    },
+    "DOS": {
+      "tactics": ["Impact"],
+      "techniques": [
+        {
+          "id": "T1498",
+          "name": "Network Denial of Service",
+          "sub_techniques": [
+            {
+              "id": "T1498.001",
+              "name": "Direct Network Flood"
+            },
+            {
+              "id": "T1498.002",
+              "name": "Reflection Amplification"
+            }
+          ]
+        },
+        {
+          "id": "T1499",
+          "name": "Endpoint Denial of Service",
+          "sub_techniques": [
+            {
+              "id": "T1499.002",
+              "name": "Service Exhaustion Flood"
+            },
+            {
+              "id": "T1499.004",
+              "name": "Application or System Exploitation"
+            }
+          ]
+        }
+      ],
+      "severity": "CRITICAL",
+      "description": "Denial of Service attack to disrupt availability of services",
+      "detection": "Monitor for abnormal traffic volume, resource consumption, connection rates",
+      "mitigation": "Rate limiting, traffic filtering, load balancing, connection throttling"
+    },
+    "DDOS": {
+      "tactics": ["Impact", "Resource Development"],
+      "techniques": [
+        {
+          "id": "T1498",
+          "name": "Network Denial of Service",
+          "sub_techniques": [
+            {
+              "id": "T1498.001",
+              "name": "Direct Network Flood"
+            }
+          ]
+        },
+        {
+          "id": "T1584",
+          "name": "Compromise Infrastructure",
+          "sub_techniques": [
+            {
+              "id": "T1584.005",
+              "name": "Botnet"
+            }
+          ]
+        }
+      ],
+      "severity": "CRITICAL",
+      "description": "Distributed Denial of Service from multiple coordinated sources",
+      "detection": "Monitor for traffic from multiple sources, geographic distribution analysis, pattern analysis",
+      "mitigation": "DDoS mitigation services, traffic scrubbing, CDN protection, rate limiting, anycast routing"
+    },
+    "PORT_SCAN": {
+      "tactics": ["Discovery", "Reconnaissance"],
+      "techniques": [
+        {
+          "id": "T1046",
+          "name": "Network Service Discovery",
+          "sub_techniques": []
+        },
+        {
+          "id": "T1595",
+          "name": "Active Scanning",
+          "sub_techniques": [
+            {
+              "id": "T1595.001",
+              "name": "Scanning IP Blocks"
+            },
+            {
+              "id": "T1595.002",
+              "name": "Vulnerability Scanning"
+            }
+          ]
+        }
+      ],
+      "severity": "MEDIUM",
+      "description": "Reconnaissance activity scanning for open ports and services",
+      "detection": "Monitor for connection attempts to multiple ports from single source, horizontal scans",
+      "mitigation": "Firewall rules, IDS/IPS, hide unnecessary services, port knocking, connection rate limiting"
+    },
+    "WEB_ATTACK": {
+      "tactics": ["Initial Access", "Execution", "Persistence"],
+      "techniques": [
+        {
+          "id": "T1190",
+          "name": "Exploit Public-Facing Application",
+          "sub_techniques": []
+        },
+        {
+          "id": "T1059",
+          "name": "Command and Scripting Interpreter",
+          "sub_techniques": [
+            {
+              "id": "T1059.007",
+              "name": "JavaScript"
+            },
+            {
+              "id": "T1059.004",
+              "name": "Unix Shell"
+            }
+          ]
+        },
+        {
+          "id": "T1505",
+          "name": "Server Software Component",
+          "sub_techniques": [
+            {
+              "id": "T1505.003",
+              "name": "Web Shell"
+            }
+          ]
+        },
+        {
+          "id": "T1566",
+          "name": "Phishing",
+          "sub_techniques": [
+            {
+              "id": "T1566.002",
+              "name": "Spearphishing Link"
+            }
+          ]
+        }
+      ],
+      "severity": "HIGH",
+      "description": "Web-based attacks including SQL injection, XSS, command injection, path traversal",
+      "detection": "Monitor for malicious payloads, unusual query patterns, suspicious user agents, anomalous HTTP methods",
+      "mitigation": "Input validation, WAF deployment, parameterized queries, CSP headers, output encoding, security headers"
+    },
+    "BOTNET": {
+      "tactics": ["Command and Control", "Impact", "Resource Development"],
+      "techniques": [
+        {
+          "id": "T1071",
+          "name": "Application Layer Protocol",
+          "sub_techniques": [
+            {
+              "id": "T1071.001",
+              "name": "Web Protocols"
+            },
+            {
+              "id": "T1071.004",
+              "name": "DNS"
+            }
+          ]
+        },
+        {
+          "id": "T1568",
+          "name": "Dynamic Resolution",
+          "sub_techniques": [
+            {
+              "id": "T1568.002",
+              "name": "Domain Generation Algorithms"
+            }
+          ]
+        },
+        {
+          "id": "T1499",
+          "name": "Endpoint Denial of Service",
+          "sub_techniques": []
+        },
+        {
+          "id": "T1583",
+          "name": "Acquire Infrastructure",
+          "sub_techniques": [
+            {
+              "id": "T1583.005",
+              "name": "Botnet"
+            }
+          ]
+        }
+      ],
+      "severity": "CRITICAL",
+      "description": "Automated malicious activity from compromised hosts coordinated via C2",
+      "detection": "Monitor for automated patterns, C2 communication, DGA domains, beaconing behavior, suspicious traffic",
+      "mitigation": "Network segmentation, behavioral analysis, bot detection, DNS monitoring, traffic filtering"
+    },
+    "INFILTRATION": {
+      "tactics": ["Initial Access", "Persistence", "Privilege Escalation", "Defense Evasion"],
+      "techniques": [
+        {
+          "id": "T1133",
+          "name": "External Remote Services",
+          "sub_techniques": []
+        },
+        {
+          "id": "T1078",
+          "name": "Valid Accounts",
+          "sub_techniques": [
+            {
+              "id": "T1078.003",
+              "name": "Local Accounts"
+            },
+            {
+              "id": "T1078.002",
+              "name": "Domain Accounts"
+            }
+          ]
+        },
+        {
+          "id": "T1068",
+          "name": "Exploitation for Privilege Escalation",
+          "sub_techniques": []
+        },
+        {
+          "id": "T1021",
+          "name": "Remote Services",
+          "sub_techniques": [
+            {
+              "id": "T1021.001",
+              "name": "Remote Desktop Protocol"
+            },
+            {
+              "id": "T1021.004",
+              "name": "SSH"
+            }
+          ]
+        },
+        {
+          "id": "T1070",
+          "name": "Indicator Removal",
+          "sub_techniques": [
+            {
+              "id": "T1070.004",
+              "name": "File Deletion"
+            }
+          ]
+        }
+      ],
+      "severity": "CRITICAL",
+      "description": "Advanced persistent threat gaining unauthorized access and maintaining presence",
+      "detection": "Monitor for lateral movement, privilege escalation, persistence mechanisms, anomalous authentication",
+      "mitigation": "Network segmentation, least privilege, EDR deployment, comprehensive logging, MFA enforcement"
+    },
+    "HEARTBLEED": {
+      "tactics": ["Credential Access", "Collection"],
+      "techniques": [
+        {
+          "id": "T1212",
+          "name": "Exploitation for Credential Access",
+          "sub_techniques": []
+        },
+        {
+          "id": "T1005",
+          "name": "Data from Local System",
+          "sub_techniques": []
+        },
+        {
+          "id": "T1040",
+          "name": "Network Sniffing",
+          "sub_techniques": []
+        }
+      ],
+      "severity": "CRITICAL",
+      "description": "OpenSSL Heartbleed vulnerability (CVE-2014-0160) exploitation to extract memory contents",
+      "detection": "Monitor for unusual TLS heartbeat requests, oversized heartbeat messages",
+      "mitigation": "Patch OpenSSL immediately, revoke and reissue certificates, monitor affected systems, update keys"
+    },
+    "UNKNOWN_THREAT": {
+      "tactics": ["Unknown"],
+      "techniques": [
+        {
+          "id": "T1???",
+          "name": "Zero-Day or Unknown Attack",
+          "sub_techniques": []
+        }
+      ],
+      "severity": "HIGH",
+      "description": "Anomalous behavior not matching known attack patterns - potential zero-day or novel attack",
+      "detection": "Behavioral analysis, anomaly detection, unsupervised ML detection, threat intelligence correlation",
+      "mitigation": "Investigate immediately, isolate affected systems, collect forensics, implement containment"
+    }
+  },
+  "severity_levels": {
+    "INFO": {
+      "score": 1,
+      "color": "green",
+      "priority": "P4",
+      "response_time": "None",
+      "description": "Informational - no action required"
+    },
+    "LOW": {
+      "score": 2,
+      "color": "blue",
+      "priority": "P3",
+      "response_time": "24 hours",
+      "description": "Low risk - monitor and review during business hours"
+    },
+    "MEDIUM": {
+      "score": 3,
+      "color": "yellow",
+      "priority": "P2",
+      "response_time": "4 hours",
+      "description": "Moderate risk - requires timely investigation"
+    },
+    "HIGH": {
+      "score": 4,
+      "color": "orange",
+      "priority": "P1",
+      "response_time": "1 hour",
+      "description": "High risk - immediate attention required"
+    },
+    "CRITICAL": {
+      "score": 5,
+      "color": "red",
+      "priority": "P0",
+      "response_time": "Immediate",
+      "description": "Critical threat - respond immediately, escalate to incident response team"
+    }
+  },
+  "kill_chain_mapping": {
+    "Reconnaissance": {
+      "description": "Gathering information to plan future attacks",
+      "related_tactics": ["Reconnaissance"],
+      "phase_number": 1
+    },
+    "Weaponization": {
+      "description": "Creating attack tools and payloads",
+      "related_tactics": ["Resource Development"],
+      "phase_number": 2
+    },
+    "Delivery": {
+      "description": "Transmitting the weapon to the target",
+      "related_tactics": ["Initial Access"],
+      "phase_number": 3
+    },
+    "Exploitation": {
+      "description": "Exploiting vulnerabilities to execute code",
+      "related_tactics": ["Execution", "Initial Access"],
+      "phase_number": 4
+    },
+    "Installation": {
+      "description": "Installing malware and establishing persistence",
+      "related_tactics": ["Persistence", "Privilege Escalation"],
+      "phase_number": 5
+    },
+    "Command and Control": {
+      "description": "Establishing remote control channel",
+      "related_tactics": ["Command and Control"],
+      "phase_number": 6
+    },
+    "Actions on Objectives": {
+      "description": "Achieving the attack goals",
+      "related_tactics": ["Collection", "Exfiltration", "Impact"],
+      "phase_number": 7
+    }
+  },
+  "attack_indicators": {
+    "BRUTE_FORCE": {
+      "iocs": [
+        "Multiple failed authentication attempts",
+        "Sequential username attempts",
+        "Common password patterns",
+        "Single source IP",
+        "High authentication request rate"
+      ],
+      "ttps": ["Password guessing", "Credential stuffing", "Dictionary attacks"]
+    },
+    "DOS": {
+      "iocs": [
+        "High packet rate from single source",
+        "Resource exhaustion",
+        "Service unavailability",
+        "Malformed packets",
+        "Connection flooding"
+      ],
+      "ttps": ["SYN flood", "UDP flood", "HTTP flood", "Slowloris"]
+    },
+    "DDOS": {
+      "iocs": [
+        "Traffic from multiple sources",
+        "Geographic distribution",
+        "Coordinated timing",
+        "Similar packet patterns",
+        "Amplification techniques"
+      ],
+      "ttps": ["Botnet coordination", "Reflection attacks", "Amplification attacks"]
+    },
+    "PORT_SCAN": {
+      "iocs": [
+        "Sequential port connections",
+        "Short connection duration",
+        "Multiple SYN packets",
+        "No established connections",
+        "Service fingerprinting"
+      ],
+      "ttps": ["TCP SYN scan", "TCP connect scan", "UDP scan", "Service enumeration"]
+    },
+    "WEB_ATTACK": {
+      "iocs": [
+        "SQL injection patterns",
+        "XSS payloads",
+        "Path traversal attempts",
+        "Unusual HTTP methods",
+        "Suspicious user agents",
+        "Command injection strings"
+      ],
+      "ttps": ["SQLi", "XSS", "CSRF", "Command injection", "File inclusion"]
+    },
+    "BOTNET": {
+      "iocs": [
+        "Beaconing behavior",
+        "DGA domain queries",
+        "C2 communication patterns",
+        "Automated behavior",
+        "Suspicious DNS queries"
+      ],
+      "ttps": ["C2 beaconing", "Domain generation", "Fast flux", "P2P communication"]
+    },
+    "INFILTRATION": {
+      "iocs": [
+        "Lateral movement",
+        "Privilege escalation attempts",
+        "Unusual authentication patterns",
+        "Persistence mechanisms",
+        "Data staging"
+      ],
+      "ttps": ["Pass-the-hash", "Golden ticket", "Credential dumping", "Remote execution"]
+    },
+    "HEARTBLEED": {
+      "iocs": [
+        "Oversized heartbeat requests",
+        "Repeated heartbeat messages",
+        "Memory disclosure patterns",
+        "TLS anomalies"
+      ],
+      "ttps": ["Memory exploitation", "Information disclosure", "Credential harvesting"]
+    }
+  }
+}

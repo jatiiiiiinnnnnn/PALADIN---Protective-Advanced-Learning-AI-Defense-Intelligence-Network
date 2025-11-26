@@ -1,18 +1,21 @@
 filebeat.inputs:
-- type: log
-  enabled: true
-  paths:
-    - /shared_logs/*.json
-    - /shared_logs/var/log/cowrie/*.json
-  scan_frequency: 10s
-  json.keys_under_root: true
-  json.add_error_key: false
+  - type: log
+    enabled: true
+    paths:
+      - /shared_logs/*.log
+      - /shared_logs/*.json
+    json.keys_under_root: true
+    json.add_error_key: true
+    tags: ["low_interaction"]
+
+  - type: log
+    enabled: true
+    paths:
+      - /cowrie_logs/log/cowrie/cowrie.json
+    json.keys_under_root: true
+    json.add_error_key: true
+    tags: ["ssh", "cowrie"]
 
 output.redis:
   hosts: ["redis:6379"]
   key: "honeypot-logs"
-  data_type: "list"
-  db: 0
-  timeout: 5s
-  codec.json:
-    pretty: false

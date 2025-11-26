@@ -1,0 +1,14 @@
+[
+  "destination_port",
+  "flow_duration",
+  "total_fwd_packets",
+  "total_backward_packets",
+  "flow_bytes/s",
+  "flow_packets/s",
+  "flow_iat_mean",
+  "fwd_iat_mean",
+  "syn_flag_count",
+  "ack_flag_count",
+  "average_packet_size",
+  "avg_fwd_segment_size"
+]
