@@ -16,6 +16,7 @@ from pathlib import Path
 import json
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+from sklearn.utils import resample
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -98,15 +99,45 @@ print(f"\n🏷️  Categories:")
 for cat, count in df_combined['attack_category'].value_counts().items():
     print(f"   {cat:20s}: {count:>8,}")
 
-# Balance classes
-df_benign = df_combined[df_combined['attack_category'] == 'NORMAL']
-df_attacks = df_combined[df_combined['attack_category'] != 'NORMAL']
 
+
+# Step 1: Limit benign
+df_benign = df_combined[df_combined['attack_category'] == 'NORMAL']
 if len(df_benign) > SAMPLE_BENIGN:
     df_benign = df_benign.sample(n=SAMPLE_BENIGN, random_state=RANDOM_STATE)
 
-df_balanced = pd.concat([df_benign, df_attacks], ignore_index=True)
-print(f"\n⚖️  Balanced: {len(df_balanced):,} rows")
+# Step 2: Balance attack types
+df_attacks = df_combined[df_combined['attack_category'] != 'NORMAL']
+
+# Set target samples per attack type
+TARGET_SAMPLES_PER_CLASS = 10000  # Adjust based on smallest class
+
+balanced_dfs = [df_benign]  # Start with benign
+
+for attack_type in df_attacks['attack_category'].unique():
+    df_attack = df_attacks[df_attacks['attack_category'] == attack_type]
+    
+    # Oversample small classes, undersample large ones
+    if len(df_attack) < TARGET_SAMPLES_PER_CLASS:
+        # Oversample (duplicate with replacement)
+        df_resampled = resample(df_attack, 
+                                n_samples=TARGET_SAMPLES_PER_CLASS, 
+                                replace=True,  # Allow duplicates
+                                random_state=RANDOM_STATE)
+        print(f"   ⬆️  {attack_type:20s}: {len(df_attack):>7,} → {TARGET_SAMPLES_PER_CLASS:>7,} (oversampled)")
+    else:
+        # Undersample (random sample)
+        df_resampled = resample(df_attack, 
+                                n_samples=TARGET_SAMPLES_PER_CLASS, 
+                                replace=False,
+                                random_state=RANDOM_STATE)
+        print(f"   ⬇️  {attack_type:20s}: {len(df_attack):>7,} → {TARGET_SAMPLES_PER_CLASS:>7,} (undersampled)")
+    
+    balanced_dfs.append(df_resampled)
+
+df_balanced = pd.concat(balanced_dfs, ignore_index=True)
+print(f"\n⚖️  Final balanced dataset: {len(df_balanced):,} samples")
+
 
 # Select features
 SELECTED_FEATURES = [
