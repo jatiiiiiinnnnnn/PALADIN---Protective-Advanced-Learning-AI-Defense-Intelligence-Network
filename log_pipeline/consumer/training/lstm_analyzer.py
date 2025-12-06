@@ -45,15 +45,22 @@ class AttackSequence:
         
     def add_attack(self, attack_type, timestamp, service=None, port=None):
         """Add attack to sequence"""
-        # Ensure timestamp is UTC aware
+        
+        # 1. Standardize Timezone (Force UTC)
         if timestamp.endswith('Z'):
              timestamp = timestamp.replace('Z', '+00:00')
         
-        current_time = datetime.fromisoformat(timestamp)
-        
-        # If the log didn't have a timezone, force it to UTC
-        if current_time.tzinfo is None:
-            current_time = current_time.replace(tzinfo=timezone.utc)
+        try:
+            current_time = datetime.fromisoformat(timestamp)
+            if current_time.tzinfo is None:
+                current_time = current_time.replace(tzinfo=timezone.utc)
+        except ValueError:
+            # Fallback for bad timestamps
+            current_time = datetime.now(timezone.utc)
+
+        # 2. Fix: Ensure first_seen is ALWAYS set
+        if self.first_seen is None:
+            self.first_seen = current_time
         
         self.last_seen = current_time
         self.total_attacks += 1
@@ -361,12 +368,17 @@ class LSTMSequenceAnalyzer:
         diversity_score = min(len(sequence.attack_types_count) / 5.0, 1.0)
         score += diversity_score * 0.2
         
-        # Factor 3: Attack rate (faster = more aggressive)
+        # Factor 3: Attack rate (Sigmoid Decay)
+        # Logic: 
+        # - Fast attacks (<5s delta) -> Score ~1.0
+        # - Medium attacks (10-30s) -> Score ~0.5
+        # - Slow/Normal (>60s) -> Score -> 0.0
         time_deltas = sequence.get_time_deltas()
         if time_deltas:
             avg_delta = np.mean(time_deltas)
-            # Fast attacks (< 60s between) are suspicious
-            rate_score = max(0, 1.0 - (avg_delta / 60.0))
+            # Sigmoid formula: 1 / (1 + e^((x - threshold) / steepness))
+            # Centers decay around 15 seconds
+            rate_score = 1 / (1 + np.exp((avg_delta - 15) / 10))
             score += rate_score * 0.3
         
         # Factor 4: Critical attack types present
