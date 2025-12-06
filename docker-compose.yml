@@ -109,3 +109,18 @@ services:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
     depends_on:
       - elasticsearch
+
+  dashboard:
+      build: 
+        context: ./dashboard
+        dockerfile: Dockerfile
+      container_name: paladin-dashboard
+      ports:
+        - "8501:8501"
+      environment:
+        - ELASTICSEARCH_HOST=http://elasticsearch:9200
+      depends_on:
+        - elasticsearch
+      volumes:
+        - ./dashboard:/app
+      command: streamlit run app.py
