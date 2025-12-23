@@ -204,9 +204,9 @@ PALADIN/
 
 ## 👥 **Contributors**
 
-* **Jatin Hans** - *Lead Architect & AI Engineer*
-* **Gauri Bhardwaj** - *Data Pipeline & Visualization*
-* **Manideep Singh** - *Honeypot Infrastructure & Testing*
+* **Jatin Hans**
+* **Gauri Bhardwaj**
+* **Manideep Singh** 
 
 ---
 
