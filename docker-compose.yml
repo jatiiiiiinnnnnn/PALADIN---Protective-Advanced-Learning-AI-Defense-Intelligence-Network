@@ -73,7 +73,7 @@ services:
 
   # --- AI Consumer ---
   consumer:
-    build: ./log_pipeline/consumer
+    build: ./log_pipeline/consumer_lstm
     container_name: "honeypot-consumer"
     command: python -u consumer.py
     depends_on:

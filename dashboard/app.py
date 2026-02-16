@@ -10,8 +10,8 @@ from datetime import datetime, timedelta
 from collections import Counter
 
 # --- Configuration ---
-ES_HOST = os.getenv("ELASTICSEARCH_HOST", "http://localhost:9200")
-INDEX_NAME = "honeypot-logs"
+ES_HOST = os.getenv("ELASTICSEARCH_HOST", "http://elasticsearch:9200")
+INDEX_NAME = "paladin-alerts"
 
 # --- Page Config ---
 st.set_page_config(
@@ -262,8 +262,9 @@ def fetch_dashboard_stats():
     }
     
     try:
-        return es.search(index=INDEX_NAME, body=query)
-    except:
+        return es.search(index=INDEX_NAME, body=query, ignore_unavailable=True)
+    except Exception as e:
+        print(f"Stats Error: {e}")
         return None
 
 def fetch_recent_logs(limit=25):
@@ -271,6 +272,7 @@ def fetch_recent_logs(limit=25):
     try:
         resp = es.search(
             index=INDEX_NAME,
+            ignore_unavailable=True,
             body={
                 "size": limit,
                 "sort": [{"@timestamp": "desc"}],
