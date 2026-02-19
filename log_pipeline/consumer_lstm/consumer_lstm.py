@@ -3,6 +3,8 @@ import time
 import numpy as np
 import redis
 from elasticsearch import Elasticsearch
+import os
+os.environ['TF_USE_LEGACY_KERAS']='0'
 from tensorflow.keras.models import load_model
 import joblib
 
@@ -10,7 +12,7 @@ print("Starting Neuro-PALADIN Live Consumer...")
 
 # 1. Load the Brain and Translators
 print("Loading LSTM Model, Scaler, and Encoder...")
-model = load_model("paladin_lstm.h5")
+model = load_model("paladin_lstm.h5",compile=False)
 scaler = joblib.load("scaler.pkl")
 encoder = joblib.load("encoder.pkl")
 print("AI Core Online.")
@@ -62,7 +64,7 @@ for message in pubsub.listen():
             log_data['model_used'] = "LSTM_Deep_Learning"
             
             # 5. Send to Elasticsearch (Dashboard)
-            es.index(index="paladin-alerts", document=log_data)
+            es.index(index="honeypot-logs", document=log_data)
             
             print(f"🚨 ATTACK DETECTED: {predicted_label} (Confidence: {log_data['ai_confidence']*100:.2f}%)")
             

@@ -11,7 +11,7 @@ from collections import Counter
 
 # --- Configuration ---
 ES_HOST = os.getenv("ELASTICSEARCH_HOST", "http://elasticsearch:9200")
-INDEX_NAME = "paladin-alerts"
+INDEX_NAME = "honeypot-logs"
 
 # --- Page Config ---
 st.set_page_config(
@@ -227,16 +227,16 @@ def fetch_dashboard_stats():
         "aggs": {
             "timeline": {
                 "date_histogram": {
-                    "field": "@timestamp",
+                    "field": "timestamp",
                     "fixed_interval": "30s"
                 },
                 "aggs": {
-                    "by_type": {"terms": {"field": "ai_attack_type.keyword"}},
+                    "by_type": {"terms": {"field": "ai_prediction.keyword"}},
                     "avg_risk": {"avg": {"field": "mitre.risk_score"}}
                 }
             },
             "attack_distribution": {
-                "terms": {"field": "ai_attack_type.keyword", "size": 15}
+                "terms": {"field": "ai_prediction.keyword", "size": 15}
             },
             "service_distribution": {
                 "terms": {"field": "service.keyword", "size": 10}
@@ -245,16 +245,16 @@ def fetch_dashboard_stats():
                 "terms": {"field": "mitre.tactics.keyword", "size": 10}
             },
             "top_attackers": {
-                "terms": {"field": "src_ip.keyword", "size": 10},
+                "terms": {"field": "source_ip.keyword", "size": 10},
                 "aggs": {
-                    "attack_count": {"value_count": {"field": "@timestamp"}},
+                    "attack_count": {"value_count": {"field": "timestamp"}},
                     "max_risk": {"max": {"field": "mitre.risk_score"}}
                 }
             },
             "max_risk": {"max": {"field": "mitre.risk_score"}},
             "avg_risk": {"avg": {"field": "mitre.risk_score"}},
-            "unique_ips": {"cardinality": {"field": "src_ip.keyword"}},
-            "total_attacks": {"value_count": {"field": "@timestamp"}},
+            "unique_ips": {"cardinality": {"field": "sourec_ip.keyword"}},
+            "total_attacks": {"value_count": {"field": "timestamp"}},
             "blocked_attacks": {
                 "filter": {"term": {"ai_final_status.keyword": "BLOCKED"}}
             }
@@ -272,18 +272,15 @@ def fetch_recent_logs(limit=25):
     try:
         resp = es.search(
             index=INDEX_NAME,
-            ignore_unavailable=True,
             body={
                 "size": limit,
-                "sort": [{"@timestamp": "desc"}],
-                "query": {"match_all": {}},
-                "_source": ["@timestamp", "src_ip", "service", "ai_attack_type", 
-                           "mitre.risk_score", "ai_final_status", "mitre.tactics", 
-                           "mitre.techniques", "username", "password"]
+                "sort": [{"timestamp": "desc"}], # Removed the @
+                "query": {"match_all": {}}
             }
         )
         return [h["_source"] for h in resp["hits"]["hits"]]
-    except:
+    except Exception as e:
+        print(f"Log Fetch Error: {e}")
         return []
 
 def fetch_geographic_data():
@@ -296,7 +293,7 @@ def fetch_geographic_data():
                 "size": 0,
                 "aggs": {
                     "by_country": {
-                        "terms": {"field": "src_ip.keyword", "size": 50}
+                        "terms": {"field": "source_ip.keyword", "size": 50}
                     }
                 }
             }
@@ -359,7 +356,7 @@ while True:
             st.markdown("### 📈 THREAT INTELLIGENCE OVERVIEW")
             kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
             
-            total = aggs["total_attacks"]["value"]
+            total = stats["hits"]["total"]["value"]
             max_risk = aggs["max_risk"]["value"] or 0.0
             avg_risk = aggs["avg_risk"]["value"] or 0.0
             active_ips = aggs["unique_ips"]["value"]
@@ -687,13 +684,13 @@ while True:
                 
                 st.dataframe(
                     df_logs,
-                    column_order=["@timestamp", "src_ip", "service", "ai_attack_type", 
+                    column_order=["timestamp", "source_ip", "service", "ai_prediction", 
                                  "risk_score", "tactics", "ai_final_status"],
                     column_config={
-                        "@timestamp": st.column_config.DatetimeColumn("Timestamp", format="DD/MM/YY HH:mm:ss"),
-                        "src_ip": st.column_config.TextColumn("Source IP", width="medium"),
+                        "timestamp": st.column_config.DatetimeColumn("Timestamp", format="DD/MM/YY HH:mm:ss"),
+                        "source_ip": st.column_config.TextColumn("Source IP", width="medium"),
                         "service": st.column_config.TextColumn("Service", width="small"),
-                        "ai_attack_type": st.column_config.TextColumn("Attack Type", width="medium"),
+                        "ai_prediction": st.column_config.TextColumn("Attack Type", width="medium"),
                         "risk_score": st.column_config.ProgressColumn(
                             "Risk",
                             min_value=0,

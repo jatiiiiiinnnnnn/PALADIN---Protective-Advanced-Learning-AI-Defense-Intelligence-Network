@@ -20,7 +20,7 @@ from ensemble_predictor import get_ensemble
 # Configuration
 REDIS_HOST = 'redis'
 REDIS_PORT = 6379
-QUEUE_NAME = 'honeypot-logs'
+QUEUE_NAME = 'honeypot_logs'
 ES_HOST = 'elasticsearch'
 ES_PORT = 9200
 
