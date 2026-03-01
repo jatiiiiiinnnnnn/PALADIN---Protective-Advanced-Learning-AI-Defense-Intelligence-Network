@@ -117,6 +117,7 @@ services:
       container_name: paladin-dashboard
       ports:
         - "8501:8501"
+      env_file: .env
       environment:
         - ELASTICSEARCH_HOST=http://elasticsearch:9200
       depends_on:

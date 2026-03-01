@@ -3,3 +3,4 @@ elasticsearch
 pandas
 plotly
 watchdog
+google-generativeai

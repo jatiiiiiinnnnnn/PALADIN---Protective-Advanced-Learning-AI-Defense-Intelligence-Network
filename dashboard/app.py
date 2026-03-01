@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import time
 import os
+import json
 from datetime import datetime, timedelta
 from collections import Counter
 
@@ -303,6 +304,46 @@ def fetch_geographic_data():
     except:
         return []
 
+
+def get_gemini_explanation(alert, api_key, timeout_sec=10):
+    """Call Google Gemini to explain the attack log in plain English."""
+    if not api_key or not api_key.strip():
+        return "Error: GEMINI_API_KEY is not set. Add it to your .env file."
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key.strip())
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        compact = {
+            "timestamp": alert.get("timestamp"),
+            "source_ip": alert.get("source_ip"),
+            "service": alert.get("service"),
+            "ai_prediction": alert.get("ai_prediction"),
+            "ai_final_status": alert.get("ai_final_status"),
+            "event_type": alert.get("event_type"),
+        }
+        mitre = alert.get("mitre") or {}
+        if isinstance(mitre, dict):
+            compact["risk_score"] = mitre.get("risk_score")
+            compact["tactics"] = mitre.get("tactics")
+        prompt = """You are a cybersecurity expert. Below is a single attack log from an intrusion detection system (PALADIN). Explain this log in simple terms for a security analyst.
+
+Include:
+1. What happened (one sentence).
+2. Severity and risk in plain language.
+3. One to three short remediation steps.
+
+Keep the total response under 200 words. Use clear, professional English.
+
+Attack log (JSON):
+""" + json.dumps(compact, indent=2)
+        response = model.generate_content(prompt, request_options={"timeout": timeout_sec})
+        if response and response.text:
+            return response.text.strip()
+        return "Error: Empty response from Gemini."
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
 # --- Sidebar Configuration ---
 with st.sidebar:
     st.markdown("### ⚙️ CONTROL PANEL")
@@ -320,6 +361,10 @@ with st.sidebar:
     st.markdown("### 🎯 FILTERS")
     risk_threshold = st.slider("Min Risk Score", 0.0, 5.0, 0.0, 0.5)
     
+    st.markdown("---")
+    st.markdown("### 🤖 GENAI ANALYST")
+    if st.button("GENERATE REPORT", use_container_width=True):
+        st.session_state["genai_requested"] = True
     st.markdown("---")
     st.markdown("### 📡 SYSTEM STATUS")
     if es:
@@ -341,380 +386,421 @@ with st.sidebar:
 st.markdown("<h1>🛡️ PALADIN</h1>", unsafe_allow_html=True)
 st.markdown("<p class='subtitle'>NEURAL DEFENSE CORE :: ACTIVE THREAT MONITORING</p>", unsafe_allow_html=True)
 
+# --- GenAI: handle GENERATE REPORT request and show report ---
+if st.session_state.get("genai_requested"):
+    with st.spinner("Generating AI report..."):
+        logs = fetch_recent_logs(1)
+        if not logs:
+            st.session_state["genai_error"] = "No alerts yet. Trigger an attack or wait for traffic."
+            st.session_state["genai_report"] = None
+        else:
+            api_key = os.getenv("GEMINI_API_KEY", "").strip()
+            if not api_key:
+                st.session_state["genai_error"] = "GEMINI_API_KEY not set. Add it to .env in the project root."
+                st.session_state["genai_report"] = None
+            else:
+                report = get_gemini_explanation(logs[0], api_key)
+                if report.startswith("Error:"):
+                    st.session_state["genai_error"] = report
+                    st.session_state["genai_report"] = None
+                else:
+                    st.session_state["genai_report"] = report
+                    st.session_state["genai_error"] = None
+        st.session_state["genai_requested"] = False
+
+if st.session_state.get("genai_report"):
+    st.markdown("### 📋 AI Incident Summary")
+    st.markdown('<div class="info-panel">', unsafe_allow_html=True)
+    st.markdown(st.session_state["genai_report"])
+    st.markdown("</div>", unsafe_allow_html=True)
+    if st.button("Clear report"):
+        st.session_state.pop("genai_report", None)
+        st.session_state.pop("genai_error", None)
+        st.rerun()
+    st.markdown("<hr>", unsafe_allow_html=True)
+elif st.session_state.get("genai_error"):
+    st.markdown("### 📋 GenAI Report")
+    st.error(st.session_state["genai_error"])
+    if st.button("Clear error"):
+        st.session_state.pop("genai_report", None)
+        st.session_state.pop("genai_error", None)
+        st.rerun()
+    st.markdown("<hr>", unsafe_allow_html=True)
+
 # Live update container
 live_container = st.empty()
 
-while True:
-    with live_container.container():
-        stats = fetch_dashboard_stats()
-        raw_logs = fetch_recent_logs(25)
+with live_container.container():
+    stats = fetch_dashboard_stats()
+    raw_logs = fetch_recent_logs(25)
+    
+    if stats and "aggregations" in stats:
+        aggs = stats["aggregations"]
         
-        if stats and "aggregations" in stats:
-            aggs = stats["aggregations"]
+        # === ROW 1: KPI METRICS ===
+        st.markdown("### 📈 THREAT INTELLIGENCE OVERVIEW")
+        kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+
+        total = stats["hits"]["total"]["value"]
+        max_risk = aggs["max_risk"]["value"] or 0.0
+        avg_risk = aggs["avg_risk"]["value"] or 0.0
+        active_ips = aggs["unique_ips"]["value"]
+        blocked = aggs["blocked_attacks"]["doc_count"]
+
+        # Dynamic Status
+        if max_risk > 4:
+            status = '<span class="status-critical">🔴 CRITICAL BREACH</span>'
+        elif max_risk > 2:
+            status = '<span class="status-elevated">🟡 ELEVATED RISK</span>'
+        else:
+            status = '<span class="status-normal">🟢 SYSTEM SECURE</span>'
+
+        with kpi1:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div style="font-size: 2rem;">📡</div>
+                <div style="font-size: 0.9rem; color: #888; margin-top: 10px;">TOTAL EVENTS</div>
+                <div style="font-size: 2rem; font-weight: bold; color: #00ff41; margin-top: 5px;">{total:,}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with kpi2:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div style="font-size: 2rem;">🔥</div>
+                <div style="font-size: 0.9rem; color: #888; margin-top: 10px;">PEAK RISK</div>
+                <div style="font-size: 2rem; font-weight: bold; color: #00ff41; margin-top: 5px;">{max_risk:.2f} / 5.0</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with kpi3:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div style="font-size: 2rem;">⚡</div>
+                <div style="font-size: 0.9rem; color: #888; margin-top: 10px;">AVG RISK</div>
+                <div style="font-size: 2rem; font-weight: bold; color: #00ff41; margin-top: 5px;">{avg_risk:.2f}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with kpi4:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div style="font-size: 2rem;">🌍</div>
+                <div style="font-size: 0.9rem; color: #888; margin-top: 10px;">HOSTILE IPs</div>
+                <div style="font-size: 2rem; font-weight: bold; color: #00ff41; margin-top: 5px;">{active_ips}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with kpi5:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div style="font-size: 2rem;">🛡️</div>
+                <div style="font-size: 0.9rem; color: #888; margin-top: 10px;">BLOCKED</div>
+                <div style="font-size: 2rem; font-weight: bold; color: #00ff41; margin-top: 5px;">{blocked}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # Status Banner
+        st.markdown(f"<div style='text-align: center; font-size: 1.5rem; margin: 20px 0;'>{status}</div>", 
+                   unsafe_allow_html=True)
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+        # === ROW 2: MAIN VISUALIZATIONS ===
+        col_left, col_right = st.columns([2, 1])
+
+        with col_left:
+            if show_timeline:
+                st.markdown("### 📉 THREAT VELOCITY :: TEMPORAL ANALYSIS")
+                buckets = aggs["timeline"]["buckets"]
+                timeline_data = []
+                risk_data = []
+        
+                for b in buckets:
+                    ts = b["key_as_string"]
+                    avg_risk_val = b.get("avg_risk", {}).get("value", 0)
+                    risk_data.append({"Time": ts, "Avg Risk": avg_risk_val or 0})
             
-            # === ROW 1: KPI METRICS ===
-            st.markdown("### 📈 THREAT INTELLIGENCE OVERVIEW")
-            kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+                    for bucket in b["by_type"]["buckets"]:
+                        timeline_data.append({
+                            "Time": ts, 
+                            "Count": bucket["doc_count"], 
+                            "Type": bucket["key"]
+                        })
+        
+                if timeline_data:
+                    # Create dual-axis chart
+                    fig = make_subplots(specs=[[{"secondary_y": True}]])
             
-            total = stats["hits"]["total"]["value"]
-            max_risk = aggs["max_risk"]["value"] or 0.0
-            avg_risk = aggs["avg_risk"]["value"] or 0.0
-            active_ips = aggs["unique_ips"]["value"]
-            blocked = aggs["blocked_attacks"]["doc_count"]
+                    df_time = pd.DataFrame(timeline_data)
+                    df_risk = pd.DataFrame(risk_data)
             
-            # Dynamic Status
-            if max_risk > 4:
-                status = '<span class="status-critical">🔴 CRITICAL BREACH</span>'
-            elif max_risk > 2:
-                status = '<span class="status-elevated">🟡 ELEVATED RISK</span>'
-            else:
-                status = '<span class="status-normal">🟢 SYSTEM SECURE</span>'
-            
-            with kpi1:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div style="font-size: 2rem;">📡</div>
-                    <div style="font-size: 0.9rem; color: #888; margin-top: 10px;">TOTAL EVENTS</div>
-                    <div style="font-size: 2rem; font-weight: bold; color: #00ff41; margin-top: 5px;">{total:,}</div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with kpi2:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div style="font-size: 2rem;">🔥</div>
-                    <div style="font-size: 0.9rem; color: #888; margin-top: 10px;">PEAK RISK</div>
-                    <div style="font-size: 2rem; font-weight: bold; color: #00ff41; margin-top: 5px;">{max_risk:.2f} / 5.0</div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with kpi3:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div style="font-size: 2rem;">⚡</div>
-                    <div style="font-size: 0.9rem; color: #888; margin-top: 10px;">AVG RISK</div>
-                    <div style="font-size: 2rem; font-weight: bold; color: #00ff41; margin-top: 5px;">{avg_risk:.2f}</div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with kpi4:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div style="font-size: 2rem;">🌍</div>
-                    <div style="font-size: 0.9rem; color: #888; margin-top: 10px;">HOSTILE IPs</div>
-                    <div style="font-size: 2rem; font-weight: bold; color: #00ff41; margin-top: 5px;">{active_ips}</div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with kpi5:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div style="font-size: 2rem;">🛡️</div>
-                    <div style="font-size: 0.9rem; color: #888; margin-top: 10px;">BLOCKED</div>
-                    <div style="font-size: 2rem; font-weight: bold; color: #00ff41; margin-top: 5px;">{blocked}</div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            # Status Banner
-            st.markdown(f"<div style='text-align: center; font-size: 1.5rem; margin: 20px 0;'>{status}</div>", 
-                       unsafe_allow_html=True)
-            
-            st.markdown("<hr>", unsafe_allow_html=True)
-            
-            # === ROW 2: MAIN VISUALIZATIONS ===
-            col_left, col_right = st.columns([2, 1])
-            
-            with col_left:
-                if show_timeline:
-                    st.markdown("### 📉 THREAT VELOCITY :: TEMPORAL ANALYSIS")
-                    buckets = aggs["timeline"]["buckets"]
-                    timeline_data = []
-                    risk_data = []
-                    
-                    for b in buckets:
-                        ts = b["key_as_string"]
-                        avg_risk_val = b.get("avg_risk", {}).get("value", 0)
-                        risk_data.append({"Time": ts, "Avg Risk": avg_risk_val or 0})
-                        
-                        for bucket in b["by_type"]["buckets"]:
-                            timeline_data.append({
-                                "Time": ts, 
-                                "Count": bucket["doc_count"], 
-                                "Type": bucket["key"]
-                            })
-                    
-                    if timeline_data:
-                        # Create dual-axis chart
-                        fig = make_subplots(specs=[[{"secondary_y": True}]])
-                        
-                        df_time = pd.DataFrame(timeline_data)
-                        df_risk = pd.DataFrame(risk_data)
-                        
-                        # Add attack count as area chart
-                        for attack_type in df_time["Type"].unique():
-                            df_filtered = df_time[df_time["Type"] == attack_type]
-                            fig.add_trace(
-                                go.Scatter(
-                                    x=df_filtered["Time"], 
-                                    y=df_filtered["Count"],
-                                    mode='lines',
-                                    name=attack_type,
-                                    stackgroup='one',
-                                    fillcolor=f'rgba({hash(attack_type) % 255}, {(hash(attack_type) * 2) % 255}, {(hash(attack_type) * 3) % 255}, 0.4)'
-                                ),
-                                secondary_y=False
-                            )
-                        
-                        # Add risk score as line
+                    # Add attack count as area chart
+                    for attack_type in df_time["Type"].unique():
+                        df_filtered = df_time[df_time["Type"] == attack_type]
                         fig.add_trace(
                             go.Scatter(
-                                x=df_risk["Time"], 
-                                y=df_risk["Avg Risk"],
-                                mode='lines+markers',
-                                name='Avg Risk Score',
-                                line=dict(color='#ff003c', width=3, dash='dot'),
-                                marker=dict(size=6)
+                                x=df_filtered["Time"], 
+                                y=df_filtered["Count"],
+                                mode='lines',
+                                name=attack_type,
+                                stackgroup='one',
+                                fillcolor=f'rgba({hash(attack_type) % 255}, {(hash(attack_type) * 2) % 255}, {(hash(attack_type) * 3) % 255}, 0.4)'
                             ),
-                            secondary_y=True
+                            secondary_y=False
                         )
-                        
-                        fig.update_layout(
-                            template="plotly_dark",
-                            height=400,
-                            paper_bgcolor="rgba(0,0,0,0)",
-                            plot_bgcolor="rgba(10,10,10,0.5)",
-                            hovermode='x unified',
-                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                        )
-                        
-                        fig.update_yaxes(title_text="Attack Count", secondary_y=False)
-                        fig.update_yaxes(title_text="Risk Score", secondary_y=True)
-                        
-                        st.plotly_chart(fig, use_container_width=True, key=f"timeline_{time.time()}")
-                    else:
-                        st.info("⏳ Monitoring network traffic...")
             
-            with col_right:
-                if show_distribution:
-                    st.markdown("### 🎯 ATTACK VECTOR DISTRIBUTION")
-                    pie_buckets = aggs["attack_distribution"]["buckets"]
-                    if pie_buckets:
-                        df_pie = pd.DataFrame(pie_buckets)
-                        fig_pie = go.Figure(data=[go.Pie(
-                            labels=df_pie["key"],
-                            values=df_pie["doc_count"],
-                            hole=0.6,
-                            marker=dict(
-                                colors=px.colors.qualitative.Bold,
-                                line=dict(color='#000000', width=2)
-                            ),
-                            textposition='inside',
-                            textinfo='percent+label'
-                        )])
-                        
-                        fig_pie.update_layout(
-                            template="plotly_dark",
-                            height=400,
-                            paper_bgcolor="rgba(0,0,0,0)",
-                            showlegend=False,
-                            annotations=[dict(text='ATTACKS', x=0.5, y=0.5, font_size=20, showarrow=False)]
-                        )
-                        
-                        st.plotly_chart(fig_pie, use_container_width=True, key=f"pie_{time.time()}")
-                    else:
-                        st.info("⏳ Awaiting attack vectors...")
+                    # Add risk score as line
+                    fig.add_trace(
+                        go.Scatter(
+                            x=df_risk["Time"], 
+                            y=df_risk["Avg Risk"],
+                            mode='lines+markers',
+                            name='Avg Risk Score',
+                            line=dict(color='#ff003c', width=3, dash='dot'),
+                            marker=dict(size=6)
+                        ),
+                        secondary_y=True
+                    )
             
-            st.markdown("<hr>", unsafe_allow_html=True)
-            
-            # === ROW 3: ADDITIONAL ANALYTICS ===
-            col_mitre, col_services = st.columns(2)
-            
-            with col_mitre:
-                if show_mitre:
-                    st.markdown("### 🎯 MITRE ATT&CK TACTICS")
-                    mitre_buckets = aggs["mitre_tactics"]["buckets"]
-                    if mitre_buckets:
-                        df_mitre = pd.DataFrame(mitre_buckets)
-                        df_mitre = df_mitre.sort_values("doc_count", ascending=True)
-                        
-                        fig_mitre = go.Figure(go.Bar(
-                            x=df_mitre["doc_count"],
-                            y=df_mitre["key"],
-                            orientation='h',
-                            marker=dict(
-                                color=df_mitre["doc_count"],
-                                colorscale='Reds',
-                                line=dict(color='#ff003c', width=1)
-                            ),
-                            text=df_mitre["doc_count"],
-                            textposition='auto'
-                        ))
-                        
-                        fig_mitre.update_layout(
-                            template="plotly_dark",
-                            height=350,
-                            paper_bgcolor="rgba(0,0,0,0)",
-                            plot_bgcolor="rgba(10,10,10,0.5)",
-                            xaxis_title="Frequency",
-                            yaxis_title=""
-                        )
-                        
-                        st.plotly_chart(fig_mitre, use_container_width=True, key=f"mitre_{time.time()}")
-                    else:
-                        st.info("⏳ Loading MITRE data...")
-            
-            with col_services:
-                if show_services:
-                    st.markdown("### 🔌 TARGETED SERVICES")
-                    service_buckets = aggs["service_distribution"]["buckets"]
-                    if service_buckets:
-                        df_services = pd.DataFrame(service_buckets)
-                        
-                        fig_services = go.Figure(data=[go.Pie(
-                            labels=df_services["key"],
-                            values=df_services["doc_count"],
-                            hole=0.5,
-                            marker=dict(
-                                colors=px.colors.sequential.Plasma,
-                                line=dict(color='#000000', width=2)
-                            )
-                        )])
-                        
-                        fig_services.update_layout(
-                            template="plotly_dark",
-                            height=350,
-                            paper_bgcolor="rgba(0,0,0,0)",
-                            showlegend=True,
-                            legend=dict(orientation="v", yanchor="middle", y=0.5)
-                        )
-                        
-                        st.plotly_chart(fig_services, use_container_width=True, key=f"services_{time.time()}")
-                    else:
-                        st.info("⏳ Analyzing services...")
-            
-            st.markdown("<hr>", unsafe_allow_html=True)
-            
-            # === ROW 4: TOP ATTACKERS ===
-            st.markdown("### 🌐 HOSTILE IP INTELLIGENCE")
-            top_attackers = aggs["top_attackers"]["buckets"]
-            if top_attackers:
-                attacker_data = []
-                for attacker in top_attackers:
-                    attacker_data.append({
-                        "IP Address": attacker["key"],
-                        "Total Attempts": attacker["doc_count"],
-                        "Peak Risk": attacker["max_risk"]["value"] or 0.0
-                    })
-                
-                df_attackers = pd.DataFrame(attacker_data)
-                
-                col_att1, col_att2 = st.columns([2, 1])
-                
-                with col_att1:
-                    fig_attackers = go.Figure(data=[
-                        go.Bar(
-                            x=df_attackers["IP Address"],
-                            y=df_attackers["Total Attempts"],
-                            marker=dict(
-                                color=df_attackers["Peak Risk"],
-                                colorscale='Turbo',
-                                showscale=True,
-                                colorbar=dict(title="Risk")
-                            ),
-                            text=df_attackers["Total Attempts"],
-                            textposition='auto'
-                        )
-                    ])
-                    
-                    fig_attackers.update_layout(
+                    fig.update_layout(
                         template="plotly_dark",
-                        height=300,
+                        height=400,
                         paper_bgcolor="rgba(0,0,0,0)",
                         plot_bgcolor="rgba(10,10,10,0.5)",
-                        xaxis_title="Source IP",
-                        yaxis_title="Attack Attempts"
-                    )
-                    
-                    st.plotly_chart(fig_attackers, use_container_width=True, key=f"attackers_{time.time()}")
-                
-                with col_att2:
-                    st.dataframe(
-                        df_attackers,
-                        use_container_width=True,
-                        height=300,
-                        column_config={
-                            "Peak Risk": st.column_config.ProgressColumn(
-                                "Peak Risk",
-                                min_value=0,
-                                max_value=5,
-                                format="%.2f"
-                            )
-                        },
-                        key=f"att_table_{time.time()}"
+                        hovermode='x unified',
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                     )
             
-            st.markdown("<hr>", unsafe_allow_html=True)
+                    fig.update_yaxes(title_text="Attack Count", secondary_y=False)
+                    fig.update_yaxes(title_text="Risk Score", secondary_y=True)
             
-            # === ROW 5: LIVE FEED ===
-            st.markdown("### 📜 LIVE INTERCEPT LOG :: NEURAL TRACE")
-            if raw_logs:
-                flat_logs = []
-                for log in raw_logs:
-                    flat_log = log.copy()
-                    mitre = flat_log.pop("mitre", {})
-                    flat_log["risk_score"] = mitre.get("risk_score", 0.0) if isinstance(mitre, dict) else 0.0
-                    flat_log["tactics"] = ", ".join(mitre.get("tactics", [])[:2]) if isinstance(mitre, dict) else ""
-                    flat_logs.append(flat_log)
-                
-                df_logs = pd.DataFrame(flat_logs)
-                
-                # Filter by risk threshold
-                if risk_threshold > 0:
-                    df_logs = df_logs[df_logs["risk_score"] >= risk_threshold]
-                
-                # High-risk alerts
-                high_risk_count = len(df_logs[df_logs["risk_score"] >= 4])
-                if high_risk_count > 0:
-                    st.markdown(f"""
-                    <div class='alert-box'>
-                        <b>⚠️ CRITICAL ALERT</b><br>
-                        {high_risk_count} high-risk attack(s) detected in recent activity!
-                    </div>
-                    """, unsafe_allow_html=True)
-                
+                    st.plotly_chart(fig, use_container_width=True, key=f"timeline_{time.time()}")
+                else:
+                    st.info("⏳ Monitoring network traffic...")
+
+        with col_right:
+            if show_distribution:
+                st.markdown("### 🎯 ATTACK VECTOR DISTRIBUTION")
+                pie_buckets = aggs["attack_distribution"]["buckets"]
+                if pie_buckets:
+                    df_pie = pd.DataFrame(pie_buckets)
+                    fig_pie = go.Figure(data=[go.Pie(
+                        labels=df_pie["key"],
+                        values=df_pie["doc_count"],
+                        hole=0.6,
+                        marker=dict(
+                            colors=px.colors.qualitative.Bold,
+                            line=dict(color='#000000', width=2)
+                        ),
+                        textposition='inside',
+                        textinfo='percent+label'
+                    )])
+            
+                    fig_pie.update_layout(
+                        template="plotly_dark",
+                        height=400,
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        showlegend=False,
+                        annotations=[dict(text='ATTACKS', x=0.5, y=0.5, font_size=20, showarrow=False)]
+                    )
+            
+                    st.plotly_chart(fig_pie, use_container_width=True, key=f"pie_{time.time()}")
+                else:
+                    st.info("⏳ Awaiting attack vectors...")
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+        # === ROW 3: ADDITIONAL ANALYTICS ===
+        col_mitre, col_services = st.columns(2)
+
+        with col_mitre:
+            if show_mitre:
+                st.markdown("### 🎯 MITRE ATT&CK TACTICS")
+                mitre_buckets = aggs["mitre_tactics"]["buckets"]
+                if mitre_buckets:
+                    df_mitre = pd.DataFrame(mitre_buckets)
+                    df_mitre = df_mitre.sort_values("doc_count", ascending=True)
+            
+                    fig_mitre = go.Figure(go.Bar(
+                        x=df_mitre["doc_count"],
+                        y=df_mitre["key"],
+                        orientation='h',
+                        marker=dict(
+                            color=df_mitre["doc_count"],
+                            colorscale='Reds',
+                            line=dict(color='#ff003c', width=1)
+                        ),
+                        text=df_mitre["doc_count"],
+                        textposition='auto'
+                    ))
+            
+                    fig_mitre.update_layout(
+                        template="plotly_dark",
+                        height=350,
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(10,10,10,0.5)",
+                        xaxis_title="Frequency",
+                        yaxis_title=""
+                    )
+            
+                    st.plotly_chart(fig_mitre, use_container_width=True, key=f"mitre_{time.time()}")
+                else:
+                    st.info("⏳ Loading MITRE data...")
+
+        with col_services:
+            if show_services:
+                st.markdown("### 🔌 TARGETED SERVICES")
+                service_buckets = aggs["service_distribution"]["buckets"]
+                if service_buckets:
+                    df_services = pd.DataFrame(service_buckets)
+            
+                    fig_services = go.Figure(data=[go.Pie(
+                        labels=df_services["key"],
+                        values=df_services["doc_count"],
+                        hole=0.5,
+                        marker=dict(
+                            colors=px.colors.sequential.Plasma,
+                            line=dict(color='#000000', width=2)
+                        )
+                    )])
+            
+                    fig_services.update_layout(
+                        template="plotly_dark",
+                        height=350,
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        showlegend=True,
+                        legend=dict(orientation="v", yanchor="middle", y=0.5)
+                    )
+            
+                    st.plotly_chart(fig_services, use_container_width=True, key=f"services_{time.time()}")
+                else:
+                    st.info("⏳ Analyzing services...")
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+        # === ROW 4: TOP ATTACKERS ===
+        st.markdown("### 🌐 HOSTILE IP INTELLIGENCE")
+        top_attackers = aggs["top_attackers"]["buckets"]
+        if top_attackers:
+            attacker_data = []
+            for attacker in top_attackers:
+                attacker_data.append({
+                    "IP Address": attacker["key"],
+                    "Total Attempts": attacker["doc_count"],
+                    "Peak Risk": attacker["max_risk"]["value"] or 0.0
+                })
+    
+            df_attackers = pd.DataFrame(attacker_data)
+    
+            col_att1, col_att2 = st.columns([2, 1])
+    
+            with col_att1:
+                fig_attackers = go.Figure(data=[
+                    go.Bar(
+                        x=df_attackers["IP Address"],
+                        y=df_attackers["Total Attempts"],
+                        marker=dict(
+                            color=df_attackers["Peak Risk"],
+                            colorscale='Turbo',
+                            showscale=True,
+                            colorbar=dict(title="Risk")
+                        ),
+                        text=df_attackers["Total Attempts"],
+                        textposition='auto'
+                    )
+                ])
+        
+                fig_attackers.update_layout(
+                    template="plotly_dark",
+                    height=300,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(10,10,10,0.5)",
+                    xaxis_title="Source IP",
+                    yaxis_title="Attack Attempts"
+                )
+        
+                st.plotly_chart(fig_attackers, use_container_width=True, key=f"attackers_{time.time()}")
+    
+            with col_att2:
                 st.dataframe(
-                    df_logs,
-                    column_order=["timestamp", "source_ip", "service", "ai_prediction", 
-                                 "risk_score", "tactics", "ai_final_status"],
+                    df_attackers,
+                    use_container_width=True,
+                    height=300,
                     column_config={
-                        "timestamp": st.column_config.DatetimeColumn("Timestamp", format="DD/MM/YY HH:mm:ss"),
-                        "source_ip": st.column_config.TextColumn("Source IP", width="medium"),
-                        "service": st.column_config.TextColumn("Service", width="small"),
-                        "ai_prediction": st.column_config.TextColumn("Attack Type", width="medium"),
-                        "risk_score": st.column_config.ProgressColumn(
-                            "Risk",
+                        "Peak Risk": st.column_config.ProgressColumn(
+                            "Peak Risk",
                             min_value=0,
                             max_value=5,
-                            format="%.2f",
-                            width="small"
-                        ),
-                        "tactics": st.column_config.TextColumn("MITRE Tactics", width="medium"),
-                        "ai_final_status": st.column_config.TextColumn("Status", width="small"),
+                            format="%.2f"
+                        )
                     },
-                    use_container_width=True,
-                    height=400,
-                    key=f"logs_{time.time()}"
+                    key=f"att_table_{time.time()}"
                 )
-            else:
-                st.info("⏳ Neural network initializing... Awaiting threat data.")
-        
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+        # === ROW 5: LIVE FEED ===
+        st.markdown("### 📜 LIVE INTERCEPT LOG :: NEURAL TRACE")
+        if raw_logs:
+            flat_logs = []
+            for log in raw_logs:
+                flat_log = log.copy()
+                mitre = flat_log.pop("mitre", {})
+                flat_log["risk_score"] = mitre.get("risk_score", 0.0) if isinstance(mitre, dict) else 0.0
+                flat_log["tactics"] = ", ".join(mitre.get("tactics", [])[:2]) if isinstance(mitre, dict) else ""
+                flat_logs.append(flat_log)
+    
+            df_logs = pd.DataFrame(flat_logs)
+    
+            # Filter by risk threshold
+            if risk_threshold > 0:
+                df_logs = df_logs[df_logs["risk_score"] >= risk_threshold]
+    
+            # High-risk alerts
+            high_risk_count = len(df_logs[df_logs["risk_score"] >= 4])
+            if high_risk_count > 0:
+                st.markdown(f"""
+                <div class='alert-box'>
+                    <b>⚠️ CRITICAL ALERT</b><br>
+                    {high_risk_count} high-risk attack(s) detected in recent activity!
+                </div>
+                """, unsafe_allow_html=True)
+    
+            st.dataframe(
+                df_logs,
+                column_order=["timestamp", "source_ip", "service", "ai_prediction", 
+                             "risk_score", "tactics", "ai_final_status"],
+                column_config={
+                    "timestamp": st.column_config.DatetimeColumn("Timestamp", format="DD/MM/YY HH:mm:ss"),
+                    "source_ip": st.column_config.TextColumn("Source IP", width="medium"),
+                    "service": st.column_config.TextColumn("Service", width="small"),
+                    "ai_prediction": st.column_config.TextColumn("Attack Type", width="medium"),
+                    "risk_score": st.column_config.ProgressColumn(
+                        "Risk",
+                        min_value=0,
+                        max_value=5,
+                        format="%.2f",
+                        width="small"
+                    ),
+                    "tactics": st.column_config.TextColumn("MITRE Tactics", width="medium"),
+                    "ai_final_status": st.column_config.TextColumn("Status", width="small"),
+                },
+                use_container_width=True,
+                height=400,
+                key=f"logs_{time.time()}"
+            )
         else:
-            st.markdown("""
+            st.info("⏳ Neural network initializing... Awaiting threat data.")
+    
+    else:
+        st.markdown("""
             <div class='alert-box' style='text-align: center; padding: 40px;'>
                 <h2>⚠️ NEURAL CORE CONNECTION LOST</h2>
                 <p>Unable to establish connection to Elasticsearch</p>
                 <p style='color: #666; font-size: 0.9rem;'>Retrying in {refresh_rate} seconds...</p>
             </div>
             """.format(refresh_rate=refresh_rate), unsafe_allow_html=True)
-    
-    time.sleep(refresh_rate)
+
+time.sleep(refresh_rate)
+st.rerun()
