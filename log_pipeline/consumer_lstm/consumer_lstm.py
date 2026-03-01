@@ -4,69 +4,117 @@ import numpy as np
 import redis
 from elasticsearch import Elasticsearch
 import os
-os.environ['TF_USE_LEGACY_KERAS']='0'
-from tensorflow.keras.models import load_model
 import joblib
 
-print("Starting Neuro-PALADIN Live Consumer...")
+# Suppress Legacy Keras warnings
+os.environ['TF_USE_LEGACY_KERAS'] = '0'
+from tensorflow.keras.models import load_model
+
+print("🏗️ Starting Neuro-PALADIN Live Consumer...")
 
 # 1. Load the Brain and Translators
-print("Loading LSTM Model, Scaler, and Encoder...")
-model = load_model("paladin_lstm.h5",compile=False)
+print("🧠 Loading LSTM Model, Scaler, and Encoder...")
+model = load_model("paladin_lstm.h5", compile=False)
 scaler = joblib.load("scaler.pkl")
 encoder = joblib.load("encoder.pkl")
-print("AI Core Online.")
+print("✅ AI Core Online.")
 
-# 2. Connect to the Nervous System (Redis & Elasticsearch)
-# We use 'redis' and 'elasticsearch' hostnames because they will run inside Docker
+# 2. Connect to Redis & Elasticsearch
 r = redis.Redis(host='redis', port=6379, db=0, decode_responses=True)
 es = Elasticsearch([{'host': 'elasticsearch', 'port': 9200, 'scheme': 'http'}])
 
-# The channel your honeypots/trigger script publishes to
 REDIS_CHANNEL = "honeypot_logs"
 pubsub = r.pubsub()
 pubsub.subscribe(REDIS_CHANNEL)
 
-print(f"Listening for live attacks on Redis channel: '{REDIS_CHANNEL}'...")
+print(f"📡 Listening for live attacks on Redis channel: '{REDIS_CHANNEL}'...")
 
-# 3. The Infinite Loop (Real-Time Inference)
+# 3. Real-Time Inference Loop
 for message in pubsub.listen():
     if message['type'] == 'message':
         try:
-            # Parse the incoming honeypot log
             log_data = json.loads(message['data'])
             
-            # --- FEATURE EXTRACTION ---
-            # The LSTM expects exactly 77 numerical features.
-            # (Note: You will map your actual honeypot JSON fields to this array later. 
-            # For now, we simulate the 77 features to keep the pipeline from crashing).
-            raw_features = np.zeros(77) 
+            # --- FEATURE ALIGNMENT (The 82-Dimension Fix) ---
+            # Create the 82-column array the model expects
+            full_features = np.zeros((1, 82)) 
             
-            # Example: If your log has 'packet_size', you'd map it like: raw_features[0] = log_data.get('packet_size', 0)
+            # Get features from trigger, default to empty list if not found
+            incoming = log_data.get('network_features', [])
             
-            # 1. Reshape for the Scaler (2D)
-            features_2d = raw_features.reshape(1, -1)
+            if incoming:
+                num_to_map = min(len(incoming), 82)
+                full_features[0, :num_to_map] = incoming[:num_to_map]
             
-            # 2. Scale the numbers (0 to 1)
-            features_scaled = scaler.transform(features_2d)
+            # Scale and Reshape to (1, 1, 82)
+            features_scaled = scaler.transform(full_features)
+            features_3d = np.reshape(features_scaled, (1, 1, 82))
             
-            # 3. Reshape for the LSTM (3D: 1 sample, 1 timestep, 77 features)
-            features_3d = np.reshape(features_scaled, (1, 1, 77))
-            
-            # 4. Make the Prediction!
+            # 4. Make Prediction
             prediction_probs = model.predict(features_3d, verbose=0)
             predicted_class_index = np.argmax(prediction_probs, axis=1)
             predicted_label = encoder.inverse_transform(predicted_class_index)[0]
+            confidence = float(np.max(prediction_probs))
             
-            # Add the AI's verdict to the log
+            # --- MAP AI VERDICT TO MITRE DASHBOARD ---
+            
+            # Define base severity for different attacks (out of 5.0)
+            SEVERITY_MAP = {
+                "Benign": 0.0,
+                "Portscan": 3.0,
+                "Infiltration - Portscan": 3.5,
+                "FTP-Patator": 3.5,
+                "SSH-Patator": 3.8,
+                "DoS Slowloris": 4.0,
+                "DoS Hulk": 4.0,
+                "Web Attack - Brute Force": 4.2,
+                "Infiltration": 4.5,
+                "Web Attack - SQL Injection": 4.8,
+                "DDoS": 5.0,
+                "Botnet": 5.0,
+                "Heartbleed": 5.0
+            }
+            
+            # Get base severity (default to 4.0 if attack isn't explicitly in list)
+            base_severity = SEVERITY_MAP.get(predicted_label, 4.0)
+            
+            # Calculate Final Risk Score (Severity * AI Confidence)
+            final_risk = round(base_severity * confidence, 2) if predicted_label != "Benign" else 0.0
+
+            # Assign Dynamic MITRE Tactics
+            if predicted_label == "Benign":
+                tactics = []
+            elif final_risk < 4.0:
+                tactics = ["Reconnaissance", "Discovery"]
+            else:
+                tactics = ["Initial Access", "Execution"]
+
+            # Create the 'mitre' object the dashboard expects
+            mitre_data = {
+                "risk_score": final_risk,
+                "tactics": tactics
+            }
+
+            # Determine Action Status based on Risk Score
+            if final_risk >= 4.0:
+                action_status = "BLOCKED"
+            elif final_risk > 0:
+                action_status = "ELEVATED_MONITORING"
+            else:
+                action_status = "ALLOWED"
+
+            # 5. Enrich Log and Send to Elasticsearch
             log_data['ai_prediction'] = predicted_label
-            log_data['ai_confidence'] = float(np.max(prediction_probs))
-            log_data['model_used'] = "LSTM_Deep_Learning"
+            log_data['ai_confidence'] = confidence
+            log_data['mitre'] = mitre_data
+            log_data['ai_final_status'] = action_status
+            log_data['service'] = log_data.get('honeypot_name', 'Unknown')
             
-            # 5. Send to Elasticsearch (Dashboard)
+            # Send to database
             es.index(index="honeypot-logs", document=log_data)
             
-            print(f"🚨 ATTACK DETECTED: {predicted_label} (Confidence: {log_data['ai_confidence']*100:.2f}%)")
+            # Terminal Output
+            print(f"🚨 VERDICT: {predicted_label} | Risk Score: {final_risk}/5.0 | Action: {action_status}")
             
         except Exception as e:
-            print(f"Error processing log: {e}")
+            print(f"⚠️ Error processing log: {e}")

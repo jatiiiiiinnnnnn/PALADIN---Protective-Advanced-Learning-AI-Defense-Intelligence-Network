@@ -253,7 +253,7 @@ def fetch_dashboard_stats():
             },
             "max_risk": {"max": {"field": "mitre.risk_score"}},
             "avg_risk": {"avg": {"field": "mitre.risk_score"}},
-            "unique_ips": {"cardinality": {"field": "sourec_ip.keyword"}},
+            "unique_ips": {"cardinality": {"field": "source_ip.keyword"}},
             "total_attacks": {"value_count": {"field": "timestamp"}},
             "blocked_attacks": {
                 "filter": {"term": {"ai_final_status.keyword": "BLOCKED"}}
