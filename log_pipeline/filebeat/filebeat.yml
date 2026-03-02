@@ -18,4 +18,4 @@ filebeat.inputs:
 
 output.redis:
   hosts: ["redis:6379"]
-  key: "honeypot-logs"
+  key: "honeypot_logs"

@@ -75,12 +75,12 @@ services:
   consumer:
     build: ./log_pipeline/consumer_lstm
     container_name: "honeypot-consumer"
-    command: python -u consumer.py
+    command: python -u consumer_lstm.py
     depends_on:
       redis: { condition: service_healthy }
       elasticsearch: { condition: service_healthy }
     volumes:
-      - ./log_pipeline/consumer:/app:rw
+      - ./log_pipeline/consumer_lstm:/app:rw
 
   # --- Data Persistence ---
   elasticsearch:
